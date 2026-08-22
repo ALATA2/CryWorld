@@ -32,7 +32,14 @@ We have shifted the visual theme of the game from a dark volcanic sunset to a br
 
 6. **Game Renaming and Versioning**:
    - Game renamed to **ARCHIPELAGO** on homepage menu, browser tab, and HUD.
-   - Added version label **V 0.110** at the bottom-left of the start screen.
+   - Added version label **V 0.114** at the bottom-left of the start screen.
+
+7. **Full Mobile & Touch Support**:
+   - **Orientation Enforcement**: Detects smartphones and displays a beautiful overlay asking the player to rotate their screen to landscape (horizontal) if in portrait mode.
+   - **Fullscreen Trigger**: Displays a button to enter fullscreen mode upon orientation lock alignment.
+   - **Virtual Joystick**: Implements an on-screen analog joystick on the bottom-left to control standard horizontal movement (W, A, S, D).
+   - **Touch Actions**: Adds touch buttons on the bottom-right for Digging (⛏️ Scava), Building (🧱 Crea), Jumping (🚀 Salta), and Running (🏃 Corsa toggle).
+   - **Swipe Look**: Allows swipe rotation controls anywhere on the screen (except joystick/buttons zones) to look around naturally.
 
 ---
 
