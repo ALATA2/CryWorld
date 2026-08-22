@@ -640,17 +640,32 @@ function animate() {
         handleTerrainInteraction();
 
         // 3. Movement Physics (Gravity & Collisions)
-        // Walk controls dampening
-        velocity.x -= velocity.x * 10.0 * delta;
-        velocity.z -= velocity.z * 10.0 * delta;
+        const inWater = camera.position.y < 8.0;
+        
+        // Walk controls dampening (less horizontal drag in water to glide)
+        const dragFactor = inWater ? 6.0 : 10.0;
+        velocity.x -= velocity.x * dragFactor * delta;
+        velocity.z -= velocity.z * dragFactor * delta;
+        
+        // Strong vertical damping in water to simulate drag and stabilize floating
+        velocity.y -= velocity.y * (inWater ? 4.0 : 1.0) * delta;
 
-        // Apply gravity
-        velocity.y -= gravity * delta;
+        // Apply gravity (neutralized/reduced underwater to feel buoyant)
+        if (inWater) {
+            velocity.y -= gravity * 0.05 * delta; // 95% gravity reduction
+        } else {
+            velocity.y -= gravity * delta;
+        }
 
-        // Jump execution inside the physics tick
-        if (keyStates.Space && isGrounded) {
-            velocity.y = jumpForce;
-            isGrounded = false;
+        // Jump execution or swim upwards
+        if (keyStates.Space) {
+            if (inWater) {
+                // Swim upwards actively using Space
+                velocity.y += 18.0 * delta;
+            } else if (isGrounded) {
+                velocity.y = jumpForce;
+                isGrounded = false;
+            }
         }
 
         direction.z = Number(keyStates.KeyW) - Number(keyStates.KeyS);
@@ -660,13 +675,33 @@ function animate() {
         // Running speed if Shift is held down
         let currentSpeed = keyStates.ShiftLeft ? runSpeed : moveSpeed;
 
-        // Apply underwater movement speed drag (slower swimming)
-        if (camera.position.y < 8.0) {
+        // Apply underwater speed drag
+        if (inWater) {
             currentSpeed *= 0.45;
         }
 
+        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
+
         if (keyStates.KeyW || keyStates.KeyS) velocity.z -= direction.z * currentSpeed * delta;
         if (keyStates.KeyA || keyStates.KeyD) velocity.x -= direction.x * currentSpeed * delta;
+
+        // Swimming pitch and buoyancy mechanics
+        if (inWater) {
+            if (isMoving) {
+                // Swim up/down based on camera look direction pitch and move direction (W/S)
+                const lookDir = new THREE.Vector3();
+                camera.getWorldDirection(lookDir);
+                // direction.z is positive for W, negative for S
+                velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
+            } else if (!keyStates.Space) {
+                // Buoyancy: slowly float up to the surface if idle
+                const floatSurface = 7.95; // target eye level at surface
+                if (camera.position.y < floatSurface) {
+                    const diff = floatSurface - camera.position.y;
+                    velocity.y += diff * 1.5 * delta;
+                }
+            }
+        }
 
         // Apply movement vector horizontally (fixed A/D inversion)
         controls.moveRight(velocity.x * delta);
