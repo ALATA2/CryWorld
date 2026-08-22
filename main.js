@@ -726,20 +726,31 @@ function animate() {
     }
 
     // 5bb. Check if player camera is underwater (Y < 8.0m) to trigger immersive effects
-    const isUnderwater = camera.position.y < 8.0;
     const underwaterOverlay = document.getElementById('underwater-overlay');
-    if (isUnderwater) {
+    if (camera.position.y < 8.0) {
+        const depth = 8.0 - camera.position.y;
+        // Maximum effect reached at 3.5m depth
+        const depthFactor = Math.min(depth / 3.5, 1.0);
+
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
-            // Pulsate the overlay opacity to simulate shifting underwater light caustics (cyan)
-            const wavePulse = 0.32 + Math.sin(clock.getElapsedTime() * 1.6) * 0.03;
-            underwaterOverlay.style.background = `rgba(0, 200, 240, ${wavePulse})`;
+            // Opacity scales with depth, plus a gentle caustics pulse
+            const baseOpacity = 0.32 * depthFactor;
+            const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.03 * depthFactor;
+            underwaterOverlay.style.background = `rgba(0, 200, 240, ${Math.max(0.0, wavePulse)})`;
         }
-        // Crystal-clear tropical turquoise fog underwater (less murky, more visibility)
-        scene.fog.color.setHex(0x00aacc);
-        scene.fog.density = 0.045;
-        // Dim lighting exposure underwater
-        renderer.toneMappingExposure = 0.75;
+
+        // Interpolate fog color from sky blue (0x8ce3ff) to tropical turquoise (0x00aacc)
+        const skyFog = new THREE.Color(0x8ce3ff);
+        const waterFog = new THREE.Color(0x00aacc);
+        skyFog.lerp(waterFog, depthFactor);
+        scene.fog.color.copy(skyFog);
+
+        // Interpolate fog density from clear air (0.0015) to dense water (0.045)
+        scene.fog.density = 0.0015 + (0.045 - 0.0015) * depthFactor;
+
+        // Interpolate exposure from bright noon (1.15) to dimmer underwater (0.75)
+        renderer.toneMappingExposure = 1.15 - (1.15 - 0.75) * depthFactor;
     } else {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
