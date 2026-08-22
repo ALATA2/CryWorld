@@ -195,14 +195,16 @@ function init() {
             sunColor: 0xffaa44, // Golden sunset sun reflections
             waterColor: 0x004c66, // Warm tropical blue-cyan
             distortionScale: 1.2, // Low distortion prevents high-frequency pixel vibration
+            alpha: 0.55, // Set semi-transparent alpha for tropical water depth effect
             fog: scene.fog !== undefined
         }
     );
     water.rotation.x = -Math.PI / 2;
     water.position.y = 8.0; // Sea level at Y = 8.0 meters
     
-    // Make water double-sided so you can see the surface from underneath
+    // Make water double-sided so you can see the surface from underneath and enable blending
     water.material.side = THREE.DoubleSide;
+    water.material.transparent = true;
     
     scene.add(water);
 
@@ -303,7 +305,7 @@ function init() {
 
     // Position player safely on the beach of the larger island
     const startX = 0;
-    const startZ = 120;
+    const startZ = 45;
     const testPos = new THREE.Vector3(startX, 20, startZ);
     const groundY = terrain.getSurfaceHeight(testPos, 32);
     camera.position.set(startX, groundY + playerHeight, startZ);
@@ -974,6 +976,11 @@ function animate() {
 
         // Interpolate exposure from bright noon (1.15) to dimmer underwater (0.75)
         renderer.toneMappingExposure = 1.15 - (1.15 - 0.75) * depthFactor;
+
+        // Make water surface highly transparent from below to see the sky clearly and hide reflection artifacts
+        if (water && water.material && water.material.uniforms['alpha']) {
+            water.material.uniforms['alpha'].value = 0.18;
+        }
     } else {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
@@ -982,6 +989,11 @@ function animate() {
         scene.fog.color.setHex(0x8ce3ff); // Matches the sky horizon bottomColor
         scene.fog.density = 0.0015; // Very thin, clear horizon fade
         renderer.toneMappingExposure = 1.15;
+
+        // Restore standard tropical transparency when looking from above
+        if (water && water.material && water.material.uniforms['alpha']) {
+            water.material.uniforms['alpha'].value = 0.55;
+        }
     }
 
     // 5c. Active Tool swing animation tick (First Person stabbing/swinging effect)
