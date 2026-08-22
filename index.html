@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archipelago - 3D Sandbox</title>
+    <!-- Dummy favicon to prevent console 404 error -->
+    <link rel="icon" href="data:,">
+    
+    <!-- Outfit Font for clean typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Outfit', sans-serif;
+            background-color: #0b1d28;
+            user-select: none;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* HUD Overlay */
+        #hud-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-sizing: border-box;
+            padding: 20px;
+        }
+
+        .hud-card {
+            background: rgba(11, 29, 40, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            color: #ffffff;
+            padding: 15px 20px;
+            pointer-events: auto; /* Enable interaction for HUD elements if needed */
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        /* Top Header Row */
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            pointer-events: none;
+        }
+
+        .title-card h1 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            background: linear-gradient(45deg, #ff7b00, #ffae00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .title-card p {
+            margin: 3px 0 0 0;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+        }
+
+        .stats-card {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            gap: 15px;
+        }
+
+        .fps-card {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 14px;
+            font-weight: 800;
+            color: #00ff88;
+            border-color: rgba(0, 255, 136, 0.3);
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
+            pointer-events: auto;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Crosshair in center */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            transition: all 0.1s ease;
+        }
+
+        #crosshair.active {
+            width: 12px;
+            height: 12px;
+            border-color: #ff5500;
+            background: rgba(255, 85, 0, 0.3);
+        }
+
+        /* Bottom Controls Card */
+        .controls-card {
+            align-self: center;
+            margin-bottom: 10px;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        .controls-title {
+            font-weight: 800;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #ff9d00;
+            margin-bottom: 8px;
+        }
+
+        .controls-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-bottom: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: 800;
+            font-family: monospace;
+        }
+
+        /* Initial Click-to-Play Overlay */
+        #blocker {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(6, 17, 23, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            cursor: pointer;
+            transition: opacity 0.5s ease;
+        }
+
+        #homepage-version {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.4);
+            font-family: monospace;
+            letter-spacing: 1px;
+            pointer-events: none;
+        }
+
+        #instructions {
+            text-align: center;
+            color: #ffffff;
+            padding: 30px;
+            max-width: 600px;
+        }
+
+        #instructions h2 {
+            font-size: 36px;
+            font-weight: 800;
+            margin: 0 0 10px 0;
+            background: linear-gradient(135deg, #00f0ff, #0072ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #instructions p.subtitle {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 0 0 40px 0;
+        }
+
+        .play-btn {
+            background: linear-gradient(90deg, #ff7b00, #ffae00);
+            border: none;
+            border-radius: 30px;
+            color: white;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(255, 123, 0, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #instructions:hover .play-btn {
+            transform: scale(1.05);
+            box-shadow: 0 12px 25px rgba(255, 123, 0, 0.6);
+        }
+
+        .instructions-detail {
+            margin-top: 40px;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .instructions-detail ul {
+            margin: 5px 0 0 0;
+            padding-left: 20px;
+        }
+
+        .instructions-detail li {
+            margin-bottom: 6px;
+        }
+
+        .hidden {
+            display: none !important;
+            opacity: 0;
+        }
+
+        /* Fullscreen Underwater Screen Tint & Vignette */
+        #underwater-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 200, 240, 0.35); /* Tropical turquoise-cyan tint */
+            mix-blend-mode: multiply; /* Natural dark multiplier blending */
+            pointer-events: none;
+            z-index: 15; /* Above canvas, below HUD card elements */
+            box-shadow: inset 0 0 100px rgba(0, 80, 120, 0.75); /* Soft tropical water vignette */
+            transition: opacity 0.4s ease;
+        }
+
+        /* Confirmation Modal Overlay */
+        #esc-confirm {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(6, 17, 23, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 30; /* Above HUD, below blocker */
+            pointer-events: auto;
+            transition: opacity 0.3s ease;
+        }
+
+        .confirm-box {
+            background: rgba(11, 29, 40, 0.95);
+            border: 2px solid #ff7b00;
+            border-radius: 16px;
+            padding: 30px 40px;
+            text-align: center;
+            box-shadow: 0 0 35px rgba(255, 123, 0, 0.4);
+            color: white;
+            max-width: 400px;
+            pointer-events: auto;
+        }
+
+        .confirm-box h3 {
+            font-size: 28px;
+            margin: 0 0 10px 0;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #ff7b00;
+        }
+
+        .confirm-box p {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            margin: 0 0 25px 0;
+        }
+
+        .confirm-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .confirm-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.1s ease;
+        }
+
+        .yes-btn {
+            background: linear-gradient(135deg, #ff3c00, #ff5500);
+            color: white;
+            box-shadow: 0 4px 15px rgba(255, 60, 0, 0.3);
+        }
+
+        .yes-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(255, 60, 0, 0.5);
+        }
+
+        .no-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+        }
+
+        .no-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.05);
+        }
+
+        /* Survival Hotbar styling */
+        #hotbar-container {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 5px;
+            align-self: center;
+            background: rgba(11, 29, 40, 0.65);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 8px 12px;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+        }
+
+        .hotbar-slot {
+            width: 54px;
+            height: 54px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1.5px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .hotbar-slot:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .hotbar-slot.active {
+            background: rgba(255, 123, 0, 0.2);
+            border-color: #ff7b00;
+            box-shadow: 0 0 15px rgba(255, 123, 0, 0.3);
+        }
+
+        .slot-num {
+            position: absolute;
+            top: 4px;
+            left: 5px;
+            font-size: 9px;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.5);
+            font-family: monospace;
+        }
+
+        .hotbar-slot.active .slot-num {
+            color: #ff7b00;
+        }
+
+        .slot-icon {
+            font-size: 20px;
+            margin-top: 2px;
+        }
+
+        .slot-name {
+            display: none;
+        }
+    </style>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <!-- Fullscreen Underwater Overlay -->
+    <div id="underwater-overlay" class="hidden"></div>
+
+    <!-- ESC Confirmation Modal (Are you sure?) -->
+    <div id="esc-confirm" class="hidden">
+        <div class="confirm-box">
+            <h3>ARE YOU SURE?</h3>
+            <p>Do you want to return to the main menu?</p>
+            <div class="confirm-buttons">
+                <button id="btn-confirm-yes" class="confirm-btn yes-btn">YES</button>
+                <button id="btn-confirm-no" class="confirm-btn no-btn">NO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Blocker Overlay for Pointer Lock -->
+    <div id="blocker">
+        <div id="homepage-version">V 0.110</div>
+        <div id="instructions">
+            <h2>ARCHIPELAGO</h2>
+            <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
+            <button class="play-btn">CLICCA PER GIOCARE</button>
+            <div class="instructions-detail">
+                <strong>COMANDI:</strong>
+                <ul>
+                    <li><span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> &nbsp; Muoviti sull'isola</li>
+                    <li><span class="key">Mouse</span> &nbsp; Guarda in giro (Visuale FPS)</li>
+                    <li><span class="key">Spazio</span> &nbsp; Salta &nbsp; | &nbsp; <span class="key">Shift</span> &nbsp; Corri</li>
+                    <li><span class="key">Click SX</span> &nbsp; <b>Scava</b> il terreno (Rimuovi voxel)</li>
+                    <li><span class="key">Click DX</span> &nbsp; <b>Crea</b> il terreno (Aggiungi voxel)</li>
+                    <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Cambia equipaggiamento (Hotbar)</li>
+                    <li><span class="key">ESC</span> &nbsp; Menu di uscita / Pausa</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD Overlay -->
+    <div id="hud-container">
+        <!-- Top Row -->
+        <div class="hud-header">
+            <div class="hud-card title-card">
+                <h1>Archipelago</h1>
+                <p>Marching Cubes Real-time Mesh Generation</p>
+            </div>
+            <div class="hud-card stats-card">
+                <div class="stat-item">🌋 <span id="pos-info">X: 0 Y: 0 Z: 0</span></div>
+            </div>
+        </div>
+
+        <!-- Center Crosshair -->
+        <div id="crosshair"></div>
+
+        <!-- Bottom Left Real-time FPS Counter -->
+        <div class="hud-card fps-card">
+            FPS: <span id="fps-counter">60</span>
+        </div>
+
+        <!-- Bottom Hotbar (Survival Style) -->
+        <div id="hotbar-container">
+            <div class="hotbar-slot active" data-slot="1">
+                <span class="slot-num">1</span>
+                <span class="slot-icon">🗡️</span>
+                <span class="slot-name">Spear</span>
+            </div>
+            <div class="hotbar-slot" data-slot="2">
+                <span class="slot-num">2</span>
+                <span class="slot-icon">🪓</span>
+                <span class="slot-name">Axe</span>
+            </div>
+            <div class="hotbar-slot" data-slot="3">
+                <span class="slot-num">3</span>
+                <span class="slot-icon">💧</span>
+                <span class="slot-name">Water</span>
+            </div>
+            <div class="hotbar-slot" data-slot="4">
+                <span class="slot-num">4</span>
+                <span class="slot-icon">🍃</span>
+                <span class="slot-name">Leaves</span>
+            </div>
+            <div class="hotbar-slot" data-slot="5">
+                <span class="slot-num">5</span>
+                <span class="slot-icon">⛓️</span>
+                <span class="slot-name">Rope</span>
+            </div>
+            <div class="hotbar-slot" data-slot="6">
+                <span class="slot-num">6</span>
+                <span class="slot-icon">🪵</span>
+                <span class="slot-name">Wood</span>
+            </div>
+            <div class="hotbar-slot" data-slot="7">
+                <span class="slot-num">7</span>
+                <span class="slot-icon">⛏️</span>
+                <span class="slot-name">Pickaxe</span>
+            </div>
+            <div class="hotbar-slot" data-slot="8">
+                <span class="slot-num">8</span>
+                <span class="slot-icon">🪨</span>
+                <span class="slot-name">Stone</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Logic -->
+    <script type="module" src="main.js"></script>
+</body>
+</html>
