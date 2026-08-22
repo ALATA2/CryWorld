@@ -424,6 +424,141 @@
         .slot-name {
             display: none;
         }
+
+        /* Mobile & Orientation styles */
+        #orientation-prompt {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #061117;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #orientation-prompt .prompt-box {
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .rotate-icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+            animation: rotate-phone 2s infinite ease-in-out;
+        }
+
+        @keyframes rotate-phone {
+            0% { transform: rotate(0deg); }
+            50% { transform: rotate(-90deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        #orientation-prompt h3 {
+            font-size: 24px;
+            margin: 0 0 10px 0;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        #orientation-prompt p {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 0 0 25px 0;
+            line-height: 1.4;
+        }
+
+        #mobile-hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        #joystick-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 120px;
+            height: 120px;
+            pointer-events: auto;
+        }
+
+        #joystick-ring {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.12);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(5px);
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        #joystick-nub {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.75);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            position: absolute;
+        }
+
+        #mobile-actions {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            display: grid;
+            grid-template-columns: repeat(2, 75px);
+            gap: 12px;
+            pointer-events: auto;
+        }
+
+        .action-btn {
+            width: 75px;
+            height: 75px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            background: rgba(255, 255, 255, 0.12);
+            color: white;
+            font-size: 13px;
+            font-weight: 800;
+            font-family: inherit;
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            touch-action: manipulation;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .action-btn:active {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(0.92);
+        }
+
+        .action-btn.active-state {
+            background: rgba(46, 204, 113, 0.4);
+            border-color: #2ecc71;
+            box-shadow: 0 0 15px rgba(46, 204, 113, 0.4);
+        }
     </style>
 
     <!-- Three.js Import Map -->
@@ -437,6 +572,34 @@
     </script>
 </head>
 <body>
+    <!-- Orientation Prompt Overlay -->
+    <div id="orientation-prompt" class="hidden">
+        <div class="prompt-box">
+            <div class="rotate-icon">📱🔄</div>
+            <h3>RUOTA IL TELEFONO</h3>
+            <p>Per giocare ad Archipelago, ruota il tuo telefono in posizione orizzontale (Landscape).</p>
+            <button id="btn-fullscreen-start" class="play-btn hidden" style="margin-top: 10px; box-shadow: 0 5px 15px rgba(255, 123, 0, 0.4);">GIOCA (FULLSCREEN)</button>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Controls HUD -->
+    <div id="mobile-hud" class="hidden">
+        <!-- Joystick Area -->
+        <div id="joystick-zone">
+            <div id="joystick-ring">
+                <div id="joystick-nub"></div>
+            </div>
+        </div>
+        
+        <!-- Action Buttons Area -->
+        <div id="mobile-actions">
+            <button id="btn-touch-dig" class="action-btn">⛏️<br>Scava</button>
+            <button id="btn-touch-build" class="action-btn">🧱<br>Crea</button>
+            <button id="btn-touch-jump" class="action-btn">🚀<br>Salta</button>
+            <button id="btn-touch-run" class="action-btn">🏃<br>Corsa</button>
+        </div>
+    </div>
+
     <!-- Fullscreen Underwater Overlay -->
     <div id="underwater-overlay" class="hidden"></div>
 
@@ -454,7 +617,7 @@
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.113</div>
+        <div id="homepage-version">V 0.114</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>

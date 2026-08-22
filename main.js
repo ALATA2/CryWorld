@@ -14,6 +14,7 @@ let spear, pickaxe, isDiggingAnim = false, animTime = 0;
 let activeSlot = 1;
 let clouds = [];
 let gameStarted = false;
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
 
 // Movement flags & velocities
 const velocity = new THREE.Vector3();
@@ -310,9 +311,50 @@ function init() {
     // 7. Player Controls (First Person) Setup
     controls = new PointerLockControls(camera, document.body);
 
-    blocker.addEventListener('click', () => {
-        controls.lock();
-    });
+    if (isMobile) {
+        // Mobile orientation overlay setup
+        const prompt = document.getElementById('orientation-prompt');
+        const startBtn = document.getElementById('btn-fullscreen-start');
+        
+        function checkOrientation() {
+            const isPortrait = window.innerHeight > window.innerWidth;
+            if (isPortrait) {
+                prompt.classList.remove('hidden');
+                startBtn.classList.add('hidden');
+                document.getElementById('mobile-hud').classList.add('hidden');
+                blocker.style.display = 'none';
+            } else {
+                prompt.classList.remove('hidden');
+                startBtn.classList.remove('hidden');
+                document.getElementById('mobile-hud').classList.add('hidden');
+                blocker.style.display = 'none';
+            }
+        }
+        
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', checkOrientation);
+        checkOrientation(); // Run check immediately
+
+        startBtn.addEventListener('click', () => {
+            // Trigger fullscreen on touch devices (requires user action)
+            const docEl = document.documentElement;
+            if (docEl.requestFullscreen) docEl.requestFullscreen();
+            else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+            else if (docEl.mozRequestFullScreen) docEl.mozRequestFullScreen();
+            else if (docEl.msRequestFullscreen) docEl.msRequestFullscreen();
+
+            prompt.classList.add('hidden');
+            blocker.style.display = 'none';
+            document.getElementById('mobile-hud').classList.remove('hidden');
+            
+            controls.enabled = true;
+            gameStarted = true;
+        });
+    } else {
+        blocker.addEventListener('click', () => {
+            controls.lock();
+        });
+    }
 
     controls.addEventListener('lock', () => {
         blocker.style.display = 'none';
@@ -577,6 +619,152 @@ function setupInputListeners() {
         if (controls.isLocked) {
             event.preventDefault();
         }
+    });
+
+    // Initialize mobile controls if on touch device
+    if (isMobile) {
+        setupMobileControls();
+    }
+}
+
+function setupMobileControls() {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    
+    // 1. Swipe look camera controls
+    document.addEventListener('touchstart', (e) => {
+        if (e.target.closest('#mobile-actions') || e.target.closest('#joystick-zone')) return;
+        if (e.touches.length === 1) {
+            touchStartX = e.touches[0].pageX;
+            touchStartY = e.touches[0].pageY;
+        }
+    }, { passive: true });
+    
+    document.addEventListener('touchmove', (e) => {
+        if (e.target.closest('#mobile-actions') || e.target.closest('#joystick-zone')) return;
+        if (e.touches.length === 1) {
+            const deltaX = e.touches[0].pageX - touchStartX;
+            const deltaY = e.touches[0].pageY - touchStartY;
+            
+            touchStartX = e.touches[0].pageX;
+            touchStartY = e.touches[0].pageY;
+            
+            // Adjust horizontal yaw (Y rotation) and vertical pitch (X rotation)
+            camera.rotation.y -= deltaX * 0.0035;
+            camera.rotation.x -= deltaY * 0.0035;
+            
+            // Clamp pitch look angle to prevent camera flipping
+            camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+        }
+    }, { passive: true });
+
+    // 2. Virtual Joystick setup
+    const joyZone = document.getElementById('joystick-zone');
+    const joyNub = document.getElementById('joystick-nub');
+    let joyActive = false;
+    let joyStart = { x: 0, y: 0 };
+    let joyMax = 40; // Max movement radius for nub
+    
+    joyZone.addEventListener('touchstart', (e) => {
+        joyActive = true;
+        joyStart.x = e.touches[0].clientX;
+        joyStart.y = e.touches[0].clientY;
+    }, { passive: true });
+    
+    document.addEventListener('touchmove', (e) => {
+        if (!joyActive) return;
+        
+        let touch = null;
+        for (let i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].target.closest('#joystick-zone') || joyActive) {
+                touch = e.touches[i];
+                break;
+            }
+        }
+        if (!touch) return;
+        
+        let dx = touch.clientX - joyStart.x;
+        let dy = touch.clientY - joyStart.y;
+        
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > joyMax) {
+            dx = (dx / dist) * joyMax;
+            dy = (dy / dist) * joyMax;
+        }
+        
+        joyNub.style.transform = `translate(${dx}px, ${dy}px)`;
+        
+        const deadzone = 10;
+        keyStates.KeyW = dy < -deadzone;
+        keyStates.KeyS = dy > deadzone;
+        keyStates.KeyA = dx < -deadzone;
+        keyStates.KeyD = dx > deadzone;
+    }, { passive: false });
+    
+    const resetJoystick = () => {
+        if (!joyActive) return;
+        joyActive = false;
+        joyNub.style.transform = 'translate(0px, 0px)';
+        keyStates.KeyW = false;
+        keyStates.KeyS = false;
+        keyStates.KeyA = false;
+        keyStates.KeyD = false;
+    };
+    
+    joyZone.addEventListener('touchend', resetJoystick);
+    joyZone.addEventListener('touchcancel', resetJoystick);
+
+    // 3. Action buttons listeners
+    const btnJump = document.getElementById('btn-touch-jump');
+    btnJump.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keyStates.Space = true;
+    });
+    btnJump.addEventListener('touchend', (e) => {
+        keyStates.Space = false;
+    });
+
+    const btnRun = document.getElementById('btn-touch-run');
+    btnRun.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keyStates.ShiftLeft = !keyStates.ShiftLeft; // Toggle running on touch
+        if (keyStates.ShiftLeft) {
+            btnRun.classList.add('active-state');
+        } else {
+            btnRun.classList.remove('active-state');
+        }
+    });
+
+    const btnDig = document.getElementById('btn-touch-dig');
+    btnDig.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        isDigging = true;
+        isBuilding = false;
+        crosshair.classList.add('active');
+        isDiggingAnim = true;
+        animTime = 0;
+        btnDig.classList.add('active-state');
+    });
+    btnDig.addEventListener('touchend', (e) => {
+        isDigging = false;
+        crosshair.classList.remove('active');
+        btnDig.classList.remove('active-state');
+    });
+
+    const btnBuild = document.getElementById('btn-touch-build');
+    btnBuild.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        isBuilding = true;
+        isDigging = false;
+        crosshair.classList.add('active');
+        isDiggingAnim = true;
+        animTime = 0;
+        btnBuild.classList.add('active-state');
+    });
+    btnBuild.addEventListener('touchend', (e) => {
+        isBuilding = false;
+        crosshair.classList.remove('active');
+        btnBuild.classList.remove('active-state');
     });
 }
 
