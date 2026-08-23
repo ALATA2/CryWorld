@@ -68,9 +68,9 @@ function init() {
     // 1. Scene & Camera Setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x44a2e6); // Deep tropical sky blue background
-    scene.fog = new THREE.FogExp2(0x44a2e6, 0.001); // Clear, very thin tropical sky fog
+    scene.fog = new THREE.FogExp2(0x44a2e6, 0.0007); // Clear, very thin tropical sky fog
 
-    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 800);
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 3000);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
     camera.position.set(0, 20, 45); // Start on beach slope
 
@@ -994,8 +994,8 @@ function animate() {
         skyFog.lerp(waterFog, depthFactor);
         scene.fog.color.copy(skyFog);
 
-        // Interpolate fog density from clear air (0.0015) to dense water (0.045)
-        scene.fog.density = 0.0015 + (0.045 - 0.0015) * depthFactor;
+        // Interpolate fog density from clear air (0.0007) to dense water (0.045)
+        scene.fog.density = 0.0007 + (0.045 - 0.0007) * depthFactor;
 
         // Interpolate exposure from bright noon (1.15) to dimmer underwater (0.75)
         renderer.toneMappingExposure = 1.15 - (1.15 - 0.75) * depthFactor;
@@ -1010,7 +1010,7 @@ function animate() {
         }
         // Restore deep clear tropical sky-blue fog and exposure settings
         scene.fog.color.setHex(0x8ce3ff); // Matches the sky horizon bottomColor
-        scene.fog.density = 0.0015; // Very thin, clear horizon fade
+        scene.fog.density = 0.0007; // Very thin, clear horizon fade
         renderer.toneMappingExposure = 1.15;
 
         // Restore standard tropical transparency when looking from above
