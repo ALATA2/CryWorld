@@ -108,6 +108,7 @@ class PerlinNoise {
 const _sandColor = new THREE.Color(0xf6f5e9); // Pure white coral sand
 const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
+const _seabedColor = new THREE.Color(0x0096b2); // Vibrant tropical turquoise-blue
 
 const _vlist = Array.from({ length: 12 }, () => new THREE.Vector3());
 const _p0 = new THREE.Vector3();
@@ -162,7 +163,14 @@ function getColorAt(vy, normal, target) {
     } else {
         // Sand Beach level
         if (vy < 4.8) {
-            target.copy(_sandColor);
+            // Under sea level Y=8.0 (which corresponds to vy = 2.66 in voxel indices)
+            if (vy < 2.66) {
+                // Seabed: transition sand color into a tropical turquoise color to avoid flat white/grey square under water
+                const depthFactor = Math.min((2.66 - vy) / 2.66, 1.0);
+                target.lerpColors(_sandColor, _seabedColor, depthFactor);
+            } else {
+                target.copy(_sandColor);
+            }
         } else if (vy < 5.8) {
             // Beach to grass transition
             const t = (vy - 4.8);

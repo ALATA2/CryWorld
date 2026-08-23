@@ -195,7 +195,7 @@ function init() {
             sunColor: 0xffaa44, // Golden sunset sun reflections
             waterColor: 0x004c66, // Warm tropical blue-cyan
             distortionScale: 1.2, // Low distortion prevents high-frequency pixel vibration
-            alpha: 0.55, // Set semi-transparent alpha for tropical water depth effect
+            alpha: 0.65, // Set vibrant semi-transparent alpha for tropical water depth effect
             fog: scene.fog !== undefined
         }
     );
@@ -205,6 +205,15 @@ function init() {
     // Make water double-sided so you can see the surface from underneath and enable blending
     water.material.side = THREE.DoubleSide;
     water.material.transparent = true;
+
+    // Patch fragment shader to flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
+    water.material.fragmentShader = water.material.fragmentShader.replace(
+        'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
+        `vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );
+         if (eye.y < worldPosition.y) {
+             surfaceNormal = -surfaceNormal;
+         }`
+    );
     
     scene.add(water);
 
@@ -979,7 +988,7 @@ function animate() {
 
         // Make water surface highly transparent from below to see the sky clearly and hide reflection artifacts
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.18;
+            water.material.uniforms['alpha'].value = 0.38;
         }
     } else {
         if (underwaterOverlay) {
@@ -992,7 +1001,7 @@ function animate() {
 
         // Restore standard tropical transparency when looking from above
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.55;
+            water.material.uniforms['alpha'].value = 0.65;
         }
     }
 
