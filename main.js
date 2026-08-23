@@ -925,9 +925,9 @@ function animate() {
         controls.moveRight(velocity.x * delta);
         controls.moveForward(-velocity.z * delta);
 
-        // Keep player inside island coordinate boundaries
-        const boundX = (terrain.width * terrain.voxelScale) / 2 - 2;
-        const boundZ = (terrain.depth * terrain.voxelScale) / 2 - 2;
+        // Keep player inside ocean boundaries (4800 meters from center, matching the 10km water plane)
+        const boundX = 4800;
+        const boundZ = 4800;
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
 
