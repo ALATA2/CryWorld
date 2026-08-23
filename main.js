@@ -70,6 +70,7 @@ function init() {
     scene.fog = new THREE.FogExp2(0x44a2e6, 0.001); // Clear, very thin tropical sky fog
 
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
     camera.position.set(0, 20, 45); // Start on beach slope
 
     clock = new THREE.Clock();
@@ -594,55 +595,92 @@ function setupInputListeners() {
 }
 
 function setupMobileControls() {
+    let lookTouchId = null;
     let touchStartX = 0;
     let touchStartY = 0;
     
-    // 1. Swipe look camera controls
+    // 1. Swipe look camera controls (independent lookTouchId tracking)
     document.addEventListener('touchstart', (e) => {
-        if (e.target.closest('#mobile-actions') || e.target.closest('#joystick-zone')) return;
-        if (e.touches.length === 1) {
-            touchStartX = e.touches[0].pageX;
-            touchStartY = e.touches[0].pageY;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            // Ignore touches on UI buttons, joystick zone or inventory hotbar
+            if (touch.target.closest('#mobile-actions') || touch.target.closest('#joystick-zone') || touch.target.closest('#hotbar-container')) continue;
+            
+            if (lookTouchId === null) {
+                lookTouchId = touch.identifier;
+                touchStartX = touch.pageX;
+                touchStartY = touch.pageY;
+                break;
+            }
         }
     }, { passive: true });
     
     document.addEventListener('touchmove', (e) => {
-        if (e.target.closest('#mobile-actions') || e.target.closest('#joystick-zone')) return;
-        if (e.touches.length === 1) {
-            const deltaX = e.touches[0].pageX - touchStartX;
-            const deltaY = e.touches[0].pageY - touchStartY;
-            
-            touchStartX = e.touches[0].pageX;
-            touchStartY = e.touches[0].pageY;
-            
-            // Adjust horizontal yaw (Y rotation) and vertical pitch (X rotation)
-            camera.rotation.y -= deltaX * 0.0035;
-            camera.rotation.x -= deltaY * 0.0035;
-            
-            // Clamp pitch look angle to prevent camera flipping
-            camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+        if (lookTouchId === null) return;
+        
+        let touch = null;
+        for (let i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].identifier === lookTouchId) {
+                touch = e.touches[i];
+                break;
+            }
         }
+        if (!touch) return;
+        
+        const deltaX = touch.pageX - touchStartX;
+        const deltaY = touch.pageY - touchStartY;
+        
+        touchStartX = touch.pageX;
+        touchStartY = touch.pageY;
+        
+        // Adjust horizontal yaw (Y rotation) and vertical pitch (X rotation)
+        camera.rotation.y -= deltaX * 0.0035;
+        camera.rotation.x -= deltaY * 0.0035;
+        
+        // Clamp pitch look to prevent vertical camera flipping
+        camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+        // Clamp camera roll (Z) to exactly 0 at all times to prevent slanted horizon / camera tilt
+        camera.rotation.z = 0;
     }, { passive: true });
+    
+    const resetLook = (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === lookTouchId) {
+                lookTouchId = null;
+                break;
+            }
+        }
+    };
+    document.addEventListener('touchend', resetLook);
+    document.addEventListener('touchcancel', resetLook);
 
-    // 2. Virtual Joystick setup
+    // 2. Virtual Joystick setup (independent joystickTouchId tracking)
     const joyZone = document.getElementById('joystick-zone');
     const joyNub = document.getElementById('joystick-nub');
     let joyActive = false;
+    let joystickTouchId = null;
     let joyStart = { x: 0, y: 0 };
     let joyMax = 40; // Max movement radius for nub
     
     joyZone.addEventListener('touchstart', (e) => {
-        joyActive = true;
-        joyStart.x = e.touches[0].clientX;
-        joyStart.y = e.touches[0].clientY;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            if (joystickTouchId === null) {
+                joystickTouchId = touch.identifier;
+                joyActive = true;
+                joyStart.x = touch.clientX;
+                joyStart.y = touch.clientY;
+                break;
+            }
+        }
     }, { passive: true });
     
     document.addEventListener('touchmove', (e) => {
-        if (!joyActive) return;
+        if (!joyActive || joystickTouchId === null) return;
         
         let touch = null;
         for (let i = 0; i < e.touches.length; i++) {
-            if (e.touches[i].target.closest('#joystick-zone') || joyActive) {
+            if (e.touches[i].identifier === joystickTouchId) {
                 touch = e.touches[i];
                 break;
             }
@@ -667,18 +705,30 @@ function setupMobileControls() {
         keyStates.KeyD = dx > deadzone;
     }, { passive: false });
     
-    const resetJoystick = () => {
+    const resetJoystick = (e) => {
         if (!joyActive) return;
-        joyActive = false;
-        joyNub.style.transform = 'translate(0px, 0px)';
-        keyStates.KeyW = false;
-        keyStates.KeyS = false;
-        keyStates.KeyA = false;
-        keyStates.KeyD = false;
+        let ended = false;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                ended = true;
+                break;
+            }
+        }
+        if (ended) {
+            joyActive = false;
+            joystickTouchId = null;
+            joyNub.style.transform = 'translate(0px, 0px)';
+            keyStates.KeyW = false;
+            keyStates.KeyS = false;
+            keyStates.KeyA = false;
+            keyStates.KeyD = false;
+        }
     };
     
     joyZone.addEventListener('touchend', resetJoystick);
     joyZone.addEventListener('touchcancel', resetJoystick);
+    document.addEventListener('touchend', resetJoystick);
+    document.addEventListener('touchcancel', resetJoystick);
 
     // 3. Action buttons listeners
     const btnJump = document.getElementById('btn-touch-jump');
