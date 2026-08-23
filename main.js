@@ -3,6 +3,7 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { VoxelTerrain } from './marching_cubes.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
 // GAME STATE variables
@@ -69,7 +70,7 @@ function init() {
     scene.background = new THREE.Color(0x44a2e6); // Deep tropical sky blue background
     scene.fog = new THREE.FogExp2(0x44a2e6, 0.001); // Clear, very thin tropical sky fog
 
-    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 800);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
     camera.position.set(0, 20, 45); // Start on beach slope
 
@@ -1173,17 +1174,21 @@ function spawnEnvironmentObjects(scene, terrain) {
         const coconutMat = new THREE.MeshStandardMaterial({
             color: 0x5a3d28, // Coconut shell brown
             flatShading: true,
-            roughness: 0.9
+            roughness: 0.90
         });
+        
+        const coconutGeo = new THREE.DodecahedronGeometry(0.24, 0);
         for (let c = 0; c < 3; c++) {
-            const coconutGeo = new THREE.SphereGeometry(0.24, 4, 4);
             const coconut = new THREE.Mesh(coconutGeo, coconutMat);
+            coconut.castShadow = true;
+            // Position cocos offset under the crown leaves
             const cAngle = c * (Math.PI * 2 / 3);
             coconut.position.set(
                 topSegment.position.x + Math.cos(cAngle) * 0.28,
-                currentHeight - 0.4,
+                currentHeight - 0.45,
                 topSegment.position.z + Math.sin(cAngle) * 0.28
             );
+            coconut.rotation.copy(topSegment.rotation);
             treeGroup.add(coconut);
         }
         
@@ -1231,42 +1236,118 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         return treeGroup;
     }
-
-    // Low-poly Rock/Boulder generator
-    function createRock() {
-        const rad = 1.0 + Math.random() * 2.8;
-        // Dodecahedron provides flat faceted rock surfaces
-        const rockGeo = new THREE.DodecahedronGeometry(rad, 0);
-        const rockMat = new THREE.MeshStandardMaterial({
-            color: 0x95a5a6, // Soft light granite grey
-            flatShading: true,
-            roughness: 0.95
-        });
-        
-        const rock = new THREE.Mesh(rockGeo, rockMat);
-        rock.castShadow = true;
-        rock.receiveShadow = true;
-        
-        // Stretch rock scale randomly on X, Y, Z to look like a jagged boulder
-        rock.scale.set(
-            0.8 + Math.random() * 1.0,
-            0.5 + Math.random() * 0.7,
-            0.8 + Math.random() * 1.0
-        );
-        
-        rock.rotation.set(
-            Math.random() * Math.PI,
-            Math.random() * Math.PI,
-            Math.random() * Math.PI
-        );
-        
-        return rock;
-    }
     
     // Group to hold env meshes. Centered relative to voxel terrain group
     const envGroup = new THREE.Group();
     envGroup.position.copy(terrain.group.position);
     scene.add(envGroup);
+
+    // ----------------------------------------------------
+    // OPTIMIZATION: Generate single instancing geometries using BufferGeometryUtils
+    // ----------------------------------------------------
+    
+    // Generate one temporary palm to extract and merge geometries
+    const tempPalm = createPalmTree();
+    const tempPalmGroup = new THREE.Group();
+    tempPalmGroup.add(tempPalm);
+    tempPalmGroup.updateMatrixWorld(true);
+    
+    const palmTrunkGeos = [];
+    const palmLeavesGeos = [];
+    const palmCoconutGeos = [];
+    
+    tempPalm.traverse((child) => {
+        if (child.isMesh) {
+            const cloneGeo = child.geometry.clone();
+            cloneGeo.applyMatrix4(child.matrixWorld);
+            
+            const color = child.material.color.getHex();
+            if (color === 0xa18f7c) {
+                palmTrunkGeos.push(cloneGeo);
+            } else if (color === 0x2ecc71) {
+                palmLeavesGeos.push(cloneGeo);
+            } else if (color === 0x5a3d28) {
+                palmCoconutGeos.push(cloneGeo);
+            }
+        }
+    });
+    
+    const masterPalmTrunkGeo = BufferGeometryUtils.mergeGeometries(palmTrunkGeos, true);
+    const masterPalmLeavesGeo = BufferGeometryUtils.mergeGeometries(palmLeavesGeos, true);
+    const masterPalmCoconutGeo = BufferGeometryUtils.mergeGeometries(palmCoconutGeos, true);
+    
+    // Dispose cloned geometries
+    palmTrunkGeos.forEach(g => g.dispose());
+    palmLeavesGeos.forEach(g => g.dispose());
+    palmCoconutGeos.forEach(g => g.dispose());
+    
+    // Generate one temporary pine to extract and merge geometries
+    const tempPine = createPineTree();
+    const tempPineGroup = new THREE.Group();
+    tempPineGroup.add(tempPine);
+    tempPineGroup.updateMatrixWorld(true);
+    
+    const pineTrunkGeos = [];
+    const pineFoliageGeos = [];
+    
+    tempPine.traverse((child) => {
+        if (child.isMesh) {
+            const cloneGeo = child.geometry.clone();
+            cloneGeo.applyMatrix4(child.matrixWorld);
+            
+            const color = child.material.color.getHex();
+            if (color === 0x8d7a6b) {
+                pineTrunkGeos.push(cloneGeo);
+            } else if (color === 0x27ae60) {
+                pineFoliageGeos.push(cloneGeo);
+            }
+        }
+    });
+    
+    const masterPineTrunkGeo = BufferGeometryUtils.mergeGeometries(pineTrunkGeos, true);
+    const masterPineFoliageGeo = BufferGeometryUtils.mergeGeometries(pineFoliageGeos, true);
+    
+    // Dispose cloned geometries
+    pineTrunkGeos.forEach(g => g.dispose());
+    pineFoliageGeos.forEach(g => g.dispose());
+
+    // Master rock geometry (unit dodecahedron, scaled per instance matrix)
+    const masterRockGeo = new THREE.DodecahedronGeometry(1.0, 0);
+
+    // Materials
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, flatShading: true, roughness: 0.75, side: THREE.DoubleSide });
+    const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: true, roughness: 0.90 });
+    const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, flatShading: true, roughness: 0.95 });
+    const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
+
+    // Instanced meshes
+    const instancedPalmsTrunk = new THREE.InstancedMesh(masterPalmTrunkGeo, trunkMat, palmTreesCount);
+    const instancedPalmsLeaves = new THREE.InstancedMesh(masterPalmLeavesGeo, leafMat, palmTreesCount);
+    const instancedPalmsCoconuts = new THREE.InstancedMesh(masterPalmCoconutGeo, coconutMat, palmTreesCount);
+    
+    const instancedPinesTrunk = new THREE.InstancedMesh(masterPineTrunkGeo, pineTrunkMat, pineTreesCount);
+    const instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, pineTreesCount);
+    
+    const instancedRocks = new THREE.InstancedMesh(masterRockGeo, rockMat, rocksCount);
+
+    // Configure shadows
+    instancedPalmsTrunk.castShadow = true; instancedPalmsTrunk.receiveShadow = true;
+    instancedPalmsLeaves.castShadow = true; instancedPalmsLeaves.receiveShadow = true;
+    instancedPalmsCoconuts.castShadow = true;
+    
+    instancedPinesTrunk.castShadow = true; instancedPinesTrunk.receiveShadow = true;
+    instancedPinesFoliage.castShadow = true; instancedPinesFoliage.receiveShadow = true;
+    
+    instancedRocks.castShadow = true; instancedRocks.receiveShadow = true;
+
+    envGroup.add(instancedPalmsTrunk);
+    envGroup.add(instancedPalmsLeaves);
+    envGroup.add(instancedPalmsCoconuts);
+    envGroup.add(instancedPinesTrunk);
+    envGroup.add(instancedPinesFoliage);
+    envGroup.add(instancedRocks);
     
     const spawnedPositions = [];
     function isFarEnough(x, z, minDist) {
@@ -1294,14 +1375,17 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         // Spawn range: between 9.0m (beaches) and 20.0m (lower plains), keeping spacing
         if (groundHeight > 8.8 && groundHeight < 20.0 && isFarEnough(wx, wz, 5.0)) {
-            const tree = createPalmTree();
-            tree.position.set(wx, groundHeight - 0.1, wz);
-            
+            const position = new THREE.Vector3(wx, groundHeight - 0.1, wz);
             const sc = 0.8 + Math.random() * 0.45;
-            tree.scale.set(sc, sc, sc);
-            tree.rotation.y = Math.random() * Math.PI * 2;
+            const scale = new THREE.Vector3(sc, sc, sc);
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * Math.PI * 2, 0));
             
-            envGroup.add(tree);
+            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+            
+            instancedPalmsTrunk.setMatrixAt(treesPlaced, matrix);
+            instancedPalmsLeaves.setMatrixAt(treesPlaced, matrix);
+            instancedPalmsCoconuts.setMatrixAt(treesPlaced, matrix);
+            
             spawnedPositions.push({ x: wx, z: wz });
             treesPlaced++;
         }
@@ -1322,14 +1406,16 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         // Spawn pine trees on mountain slopes (20.0m up to 55.0m)
         if (groundHeight >= 20.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.5)) {
-            const pine = createPineTree();
-            pine.position.set(wx, groundHeight - 0.15, wz);
-            
+            const position = new THREE.Vector3(wx, groundHeight - 0.15, wz);
             const sc = 0.85 + Math.random() * 0.45;
-            pine.scale.set(sc, sc, sc);
-            pine.rotation.y = Math.random() * Math.PI * 2;
+            const scale = new THREE.Vector3(sc, sc, sc);
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * Math.PI * 2, 0));
             
-            envGroup.add(pine);
+            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+            
+            instancedPinesTrunk.setMatrixAt(pinesPlaced, matrix);
+            instancedPinesFoliage.setMatrixAt(pinesPlaced, matrix);
+            
             spawnedPositions.push({ x: wx, z: wz });
             pinesPlaced++;
         }
@@ -1349,20 +1435,42 @@ function spawnEnvironmentObjects(scene, terrain) {
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 32);
         
         if (groundHeight > 7.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.0)) {
-            const rock = createRock();
-            rock.position.set(wx, groundHeight - 0.25, wz);
+            const position = new THREE.Vector3(wx, groundHeight - 0.25, wz);
+            const scale = new THREE.Vector3(
+                0.8 + Math.random() * 1.0,
+                0.5 + Math.random() * 0.7,
+                0.8 + Math.random() * 1.0
+            );
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+                Math.random() * Math.PI,
+                Math.random() * Math.PI,
+                Math.random() * Math.PI
+            ));
             
-            envGroup.add(rock);
+            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+            
+            instancedRocks.setMatrixAt(rocksPlaced, matrix);
+            
             spawnedPositions.push({ x: wx, z: wz });
             rocksPlaced++;
         }
     }
 
-    // Optimize: Disable matrix updates for all static environment meshes to save CPU draw call prep time
-    envGroup.updateMatrixWorld(true);
-    envGroup.traverse((child) => {
-        child.matrixAutoUpdate = false;
-    });
+    // Flag instance matrices for update
+    instancedPalmsTrunk.instanceMatrix.needsUpdate = true;
+    instancedPalmsLeaves.instanceMatrix.needsUpdate = true;
+    instancedPalmsCoconuts.instanceMatrix.needsUpdate = true;
+    instancedPinesTrunk.instanceMatrix.needsUpdate = true;
+    instancedPinesFoliage.instanceMatrix.needsUpdate = true;
+    instancedRocks.instanceMatrix.needsUpdate = true;
+    
+    // Disable autoUpdate on instanced components as they are static
+    instancedPalmsTrunk.matrixAutoUpdate = false;
+    instancedPalmsLeaves.matrixAutoUpdate = false;
+    instancedPalmsCoconuts.matrixAutoUpdate = false;
+    instancedPinesTrunk.matrixAutoUpdate = false;
+    instancedPinesFoliage.matrixAutoUpdate = false;
+    instancedRocks.matrixAutoUpdate = false;
 }
 
 function updateHeightmap() {
