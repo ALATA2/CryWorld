@@ -1304,18 +1304,26 @@ function spawnEnvironmentObjects(scene, terrain) {
 
 function updateHeightmap() {
     if (!terrain) return;
-    const scale = 3.0;
     const width = 128;
+    const height = 32;
     const depth = 128;
+    const scale = 3.0; // voxelScale
+    
+    // Scan density values directly from top to bottom (very fast, no 3D raycasting/binary search)
+    const densities = terrain.densities;
     
     for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
-            const wx = (x - width / 2) * scale;
-            const wz = (z - depth / 2) * scale;
-            const pos = new THREE.Vector3(wx, 0, wz);
-            // Search downwards starting from peak (96 meters)
-            const h = terrain.getSurfaceHeight(pos, 96.0);
-            
+            let surfaceY = 0;
+            for (let y = height - 1; y >= 0; y--) {
+                const idx = x + y * width + z * width * height;
+                if (densities[idx] >= 0.0) { // solid voxel threshold
+                    surfaceY = y;
+                    break;
+                }
+            }
+            // Convert local voxel Y coordinate to world height (meters)
+            const h = surfaceY * scale;
             const norm = Math.max(0.0, Math.min(96.0, h)) / 96.0;
             heightmapData[x + z * width] = Math.floor(norm * 255);
         }
