@@ -8,7 +8,7 @@ import { VoxelTerrain } from './marching_cubes.js';
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, shoreWaves, shoreWaveMaterial;
+let terrain, water, sky, sun, heightmapTexture, heightmapData;
 let controls;
 let spear, pickaxe, isDiggingAnim = false, animTime = 0;
 let activeSlot = 1;
@@ -206,7 +206,18 @@ function init() {
     water.material.side = THREE.DoubleSide;
     water.material.transparent = true;
 
-    // Patch fragment shader to flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
+    // Define heightmap texture uniform in water material
+    water.material.uniforms['heightmapTexture'] = { value: null };
+
+    // Patch fragment shader to:
+    // 1. Declare heightmapTexture sampler
+    // 2. Flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
+    // 3. Compute dynamic shoreline foam waves that break against any voxel surface
+    water.material.fragmentShader = water.material.fragmentShader.replace(
+        'uniform sampler2D mirrorSampler;',
+        'uniform sampler2D mirrorSampler;\nuniform sampler2D heightmapTexture;'
+    );
+
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
         `vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );
@@ -214,103 +225,47 @@ function init() {
              surfaceNormal = -surfaceNormal;
          }`
     );
+
+    water.material.fragmentShader = water.material.fragmentShader.replace(
+        'gl_FragColor = vec4( outgoingLight, alpha );',
+        `// Map world position XZ to heightmap UV (footprint 384x384 centered at 0,0)
+         vec2 heightmapUV = (worldPosition.xz + 192.0) / 384.0;
+         float foamIntensity = 0.0;
+         if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
+             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 96.0;
+             float waterDepth = 8.0 - groundHeight;
+             
+             // If shallow, generate waves breaking against the shore/object
+             if (waterDepth > 0.0 && waterDepth < 2.2) {
+                 float depthFactor = 1.0 - (waterDepth / 2.2);
+                 
+                 // Breathing wave wave cycle (period: ~4.5 seconds)
+                 float waveCycle = sin(time * 1.4 - waterDepth * 7.5) * 0.5 + 0.5;
+                 
+                 // Foam is strong at the wave front and in very shallow water
+                 foamIntensity = smoothstep(0.35, 0.85, depthFactor * waveCycle) * 0.85;
+                 
+                 // Fine noise bubble texture
+                 float bubbleNoise = texture2D(normalSampler, worldPosition.xz * 0.2 + time * 0.08).r;
+                 foamIntensity += bubbleNoise * 0.25 * smoothstep(0.1, 0.7, foamIntensity);
+                 foamIntensity = clamp(foamIntensity, 0.0, 1.0);
+             }
+         }
+         
+         vec3 finalColor = mix(outgoingLight, vec3(0.92, 0.96, 1.0), foamIntensity);
+         float finalAlpha = mix(alpha, 0.95, foamIntensity);
+         gl_FragColor = vec4(finalColor, finalAlpha);`
+    );
     
     scene.add(water);
-
-    // 5b. Shore Waves Setup (Soft breathing waves using dynamic shader)
-    // Footprint scaled to the tripled island dimensions (360m x 360m)
-    const shoreWaveGeometry = new THREE.PlaneGeometry(360, 360, 64, 64);
-    shoreWaveMaterial = new THREE.ShaderMaterial({
-        transparent: true,
-        depthWrite: false, // Prevents ocean occlusion issues
-        blending: THREE.NormalBlending,
-        side: THREE.DoubleSide, // Visible from underwater looking up
-        // Polygon offset offsets the depth testing to completely prevent z-fighting / shoreline flickering
-        polygonOffset: true,
-        polygonOffsetFactor: -1.0,
-        polygonOffsetUnits: -4.0,
-        uniforms: {
-            time: { value: 0 },
-            islandCenter: { value: new THREE.Vector2(0, 0) }
-        },
-        vertexShader: `
-            varying vec3 vWorldPosition;
-            varying vec2 vUv;
-            void main() {
-                vUv = uv;
-                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                vWorldPosition = worldPosition.xyz;
-                gl_Position = projectionMatrix * viewMatrix * worldPosition;
-            }
-        `,
-        fragmentShader: `
-            uniform float time;
-            varying vec3 vWorldPosition;
-            varying vec2 vUv;
-
-            // Pseudo-random noise function in GLSL
-            float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-            }
-
-            // 2D Value Noise
-            float noise(vec2 p) {
-                vec2 i = floor(p);
-                vec2 f = fract(p);
-                vec2 u = f * f * (3.0 - 2.0 * f);
-                return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
-                           mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
-            }
-
-            void main() {
-                // Distance from center (0, 0) in the XZ world plane
-                float d = length(vWorldPosition.xz);
-
-                // Distort distance with noise for an organic wave contour
-                float scale = 0.05;
-                float waveNoise = noise(vWorldPosition.xz * scale + time * 0.05) * 5.0;
-                float wavyDist = d + waveNoise;
-
-                // Slow breathing tide (Gentle wash back and forth on the beach, period ~7 seconds)
-                float tide = sin(time * 0.9) * 2.0;
-
-                // Foam line is active at the breathing tide contact zone
-                float distToTide = abs(wavyDist - (134.0 + tide));
-
-                // Single soft shore foam band
-                float foam = smoothstep(5.0, 0.0, distToTide) * 0.7;
-
-                // Add secondary bubbly detail to the foam
-                float bubbleNoise = noise(vWorldPosition.xz * 0.35 - time * 0.2) * 0.25;
-                foam += bubbleNoise * smoothstep(0.1, 0.6, foam);
-
-                // Break up the foam line using large noise mask to look like natural sea foam patches
-                float patchNoise = noise(vWorldPosition.xz * 0.08 - time * 0.08);
-                foam *= smoothstep(0.2, 0.65, patchNoise);
-
-                // Shore Mask: ensure waves only exist in the beach surf zone (110m to 165m)
-                float shoreMask = smoothstep(165.0, 140.0, d) * smoothstep(110.0, 128.0, d);
-
-                // Permanent subtle background shore foam at the beach edge (very soft)
-                float ambientFoam = smoothstep(138.0, 126.0, d) * 0.04 * (0.8 + 0.2 * sin(time * 1.0));
-
-                float alpha = (foam * shoreMask) + ambientFoam;
-                vec3 foamColor = vec3(0.92, 0.96, 1.0); // Soft cyan-tinted ocean foam white
-
-                // Reduced overall opacity for a subtle, natural, non-distracting look
-                gl_FragColor = vec4(foamColor, alpha * 0.40);
-            }
-        `
-    });
-
-    shoreWaves = new THREE.Mesh(shoreWaveGeometry, shoreWaveMaterial);
-    shoreWaves.rotation.x = -Math.PI / 2;
-    shoreWaves.position.y = 8.05; // 5cm above sea level to eliminate z-fighting
-    scene.add(shoreWaves);
 
     // 6. Marching Cubes Voxel Terrain Setup
     // Tripled footprint: Width = 128, Height = 32, Depth = 128, VoxelScale = 3.0 (total island footprint: 384m x 96m x 384m)
     terrain = new VoxelTerrain(scene, 128, 32, 128, 3.0);
+
+    // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
+    heightmapData = new Uint8Array(128 * 128);
+    updateHeightmap();
 
     // Position player safely on the beach of the larger island
     const startX = 0;
@@ -812,6 +767,7 @@ function handleTerrainInteraction() {
             if (modified) {
                 // Instantly rebuild the dirty chunks in this frame
                 terrain.update();
+                updateHeightmap();
             }
         }
     }
@@ -1343,5 +1299,44 @@ function spawnEnvironmentObjects(scene, terrain) {
             spawnedPositions.push({ x: wx, z: wz });
             rocksPlaced++;
         }
+    }
+}
+
+function updateHeightmap() {
+    if (!terrain) return;
+    const scale = 3.0;
+    const width = 128;
+    const depth = 128;
+    
+    for (let x = 0; x < width; x++) {
+        for (let z = 0; z < depth; z++) {
+            const wx = (x - width / 2) * scale;
+            const wz = (z - depth / 2) * scale;
+            const pos = new THREE.Vector3(wx, 0, wz);
+            // Search downwards starting from peak (96 meters)
+            const h = terrain.getSurfaceHeight(pos, 96.0);
+            
+            const norm = Math.max(0.0, Math.min(96.0, h)) / 96.0;
+            heightmapData[x + z * width] = Math.floor(norm * 255);
+        }
+    }
+    
+    if (!heightmapTexture) {
+        heightmapTexture = new THREE.DataTexture(
+            heightmapData,
+            width,
+            depth,
+            THREE.RedFormat,
+            THREE.UnsignedByteType
+        );
+        heightmapTexture.minFilter = THREE.LinearFilter;
+        heightmapTexture.magFilter = THREE.LinearFilter;
+        heightmapTexture.needsUpdate = true;
+        
+        if (water && water.material && water.material.uniforms) {
+            water.material.uniforms['heightmapTexture'] = { value: heightmapTexture };
+        }
+    } else {
+        heightmapTexture.needsUpdate = true;
     }
 }
