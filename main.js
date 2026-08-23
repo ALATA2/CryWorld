@@ -81,6 +81,7 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false; // Optimize: Do not update shadows every frame!
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15; // Bright, sun-drenched exposure
 
@@ -206,6 +207,13 @@ function init() {
     // Make water double-sided so you can see the surface from underneath and enable blending
     water.material.side = THREE.DoubleSide;
     water.material.transparent = true;
+
+    // Optimize: Skip reflection rendering pass if camera is underwater (since reflections are invisible from below)
+    const originalOnBeforeRender = water.onBeforeRender;
+    water.onBeforeRender = function(renderer, scene, camera) {
+        if (camera.position.y < 8.0) return; // Skip mirror pass!
+        originalOnBeforeRender.call(this, renderer, scene, camera);
+    };
 
     // Define heightmap texture uniform in water material
     water.material.uniforms['heightmapTexture'] = { value: null };
@@ -518,6 +526,9 @@ function init() {
     // 8. Event Listeners
     setupInputListeners();
 
+    // Trigger initial static shadow map render
+    renderer.shadowMap.needsUpdate = true;
+
     // Adjust sizes on resize
     window.addEventListener('resize', onWindowResize);
 }
@@ -818,6 +829,7 @@ function handleTerrainInteraction() {
                 // Instantly rebuild the dirty chunks in this frame
                 terrain.update();
                 updateHeightmap();
+                renderer.shadowMap.needsUpdate = true; // Optimize: Request shadow map update on terrain change!
             }
         }
     }
@@ -1345,6 +1357,12 @@ function spawnEnvironmentObjects(scene, terrain) {
             rocksPlaced++;
         }
     }
+
+    // Optimize: Disable matrix updates for all static environment meshes to save CPU draw call prep time
+    envGroup.updateMatrixWorld(true);
+    envGroup.traverse((child) => {
+        child.matrixAutoUpdate = false;
+    });
 }
 
 function updateHeightmap() {

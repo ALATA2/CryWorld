@@ -218,6 +218,7 @@ class VoxelChunk {
         this.mesh = new THREE.Mesh(this.geometry, terrain.material);
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
+        this.mesh.matrixAutoUpdate = false; // Optimize: Chunk is static relative to terrain group
         
         this.dirty = true;
     }
