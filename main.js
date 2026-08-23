@@ -910,11 +910,6 @@ function animate() {
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
     water.material.uniforms['time'].value += delta * 0.12;
 
-    // 5b. Shore waves animation
-    if (shoreWaveMaterial) {
-        shoreWaveMaterial.uniforms['time'].value += delta;
-    }
-
     // 5bb. Check if player camera is underwater (Y < 8.0m) to trigger immersive effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
     if (camera.position.y < 8.0) {
