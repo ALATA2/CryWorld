@@ -1586,7 +1586,8 @@ function checkFoliageFalling() {
     for (let i = 0; i < palmInstances.length; i++) {
         const inst = palmInstances[i];
         if (inst.falling) continue;
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.1;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1598,7 +1599,8 @@ function checkFoliageFalling() {
     for (let i = 0; i < pineInstances.length; i++) {
         const inst = pineInstances[i];
         if (inst.falling) continue;
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.15;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1610,7 +1612,8 @@ function checkFoliageFalling() {
     for (let i = 0; i < rockInstances.length; i++) {
         const inst = rockInstances[i];
         if (inst.falling) continue;
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.25;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1631,7 +1634,8 @@ function updateFoliagePhysics(delta) {
         const inst = palmInstances[i];
         if (!inst.falling) continue;
         
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.1;
         
         inst.velocityY -= gravityForce * delta;
@@ -1659,7 +1663,8 @@ function updateFoliagePhysics(delta) {
         const inst = pineInstances[i];
         if (!inst.falling) continue;
         
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.15;
         
         inst.velocityY -= gravityForce * delta;
@@ -1686,7 +1691,8 @@ function updateFoliagePhysics(delta) {
         const inst = rockInstances[i];
         if (!inst.falling) continue;
         
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
         const targetY = groundHeight - 0.25;
         
         inst.velocityY -= gravityForce * delta;
