@@ -814,7 +814,7 @@ function onWindowResize() {
 
 // Perform raycasting and modify terrain
 function handleTerrainInteraction() {
-    if (!controls.isLocked) return;
+    if (isMobile ? !gameStarted : !controls.isLocked) return;
     if (!isDigging && !isBuilding) return;
 
     const now = performance.now();
@@ -867,7 +867,7 @@ function animate() {
         fpsLastTime = time;
     }
 
-    if (controls.isLocked) {
+    if (isMobile ? gameStarted : controls.isLocked) {
         // 2. Terrain Interaction (Dig/Build holding mouse)
         handleTerrainInteraction();
 
