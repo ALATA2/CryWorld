@@ -57,6 +57,16 @@ const crosshair = document.getElementById('crosshair');
 let fpsLastTime = performance.now();
 let fpsFrames = 0;
 
+// Instanced mesh variables for environment objects
+let instancedPalmsTrunk, instancedPalmsLeaves, instancedPalmsCoconuts;
+let instancedPinesTrunk, instancedPinesFoliage;
+let instancedRocks;
+
+// Arrays containing positions and falling states of all environment objects
+let palmInstances = [];
+let pineInstances = [];
+let rockInstances = [];
+
 // Initialize the game
 init();
 animate();
@@ -831,6 +841,7 @@ function handleTerrainInteraction() {
                 terrain.update();
                 updateHeightmap();
                 renderer.shadowMap.needsUpdate = true; // Optimize: Request shadow map update on terrain change!
+                checkFoliageFalling(); // Check if any tree/rock lost its support ground!
             }
         }
     }
@@ -844,6 +855,9 @@ function animate() {
 
     const time = performance.now();
     const delta = Math.min(clock.getDelta(), 0.1); // Clamp delta to avoid massive leaps on frame drops
+
+    // Update falling tree and rock physics
+    updateFoliagePhysics(delta);
 
     // 1. FPS counter update
     fpsFrames++;
@@ -1322,15 +1336,20 @@ function spawnEnvironmentObjects(scene, terrain) {
     const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
 
-    // Instanced meshes
-    const instancedPalmsTrunk = new THREE.InstancedMesh(masterPalmTrunkGeo, trunkMat, palmTreesCount);
-    const instancedPalmsLeaves = new THREE.InstancedMesh(masterPalmLeavesGeo, leafMat, palmTreesCount);
-    const instancedPalmsCoconuts = new THREE.InstancedMesh(masterPalmCoconutGeo, coconutMat, palmTreesCount);
+    // Initialize/clear global instance arrays
+    palmInstances = [];
+    pineInstances = [];
+    rockInstances = [];
+
+    // Instanced meshes (assigned to global variables instead of local constants)
+    instancedPalmsTrunk = new THREE.InstancedMesh(masterPalmTrunkGeo, trunkMat, palmTreesCount);
+    instancedPalmsLeaves = new THREE.InstancedMesh(masterPalmLeavesGeo, leafMat, palmTreesCount);
+    instancedPalmsCoconuts = new THREE.InstancedMesh(masterPalmCoconutGeo, coconutMat, palmTreesCount);
     
-    const instancedPinesTrunk = new THREE.InstancedMesh(masterPineTrunkGeo, pineTrunkMat, pineTreesCount);
-    const instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, pineTreesCount);
+    instancedPinesTrunk = new THREE.InstancedMesh(masterPineTrunkGeo, pineTrunkMat, pineTreesCount);
+    instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, pineTreesCount);
     
-    const instancedRocks = new THREE.InstancedMesh(masterRockGeo, rockMat, rocksCount);
+    instancedRocks = new THREE.InstancedMesh(masterRockGeo, rockMat, rocksCount);
 
     // Configure shadows
     instancedPalmsTrunk.castShadow = true; instancedPalmsTrunk.receiveShadow = true;
@@ -1375,16 +1394,29 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         // Spawn range: between 9.0m (beaches) and 20.0m (lower plains), keeping spacing
         if (groundHeight > 8.8 && groundHeight < 20.0 && isFarEnough(wx, wz, 5.0)) {
-            const position = new THREE.Vector3(wx, groundHeight - 0.1, wz);
+            const y = groundHeight - 0.1;
+            const rotationY = Math.random() * Math.PI * 2;
             const sc = 0.8 + Math.random() * 0.45;
+            
+            const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(sc, sc, sc);
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * Math.PI * 2, 0));
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
             
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
             
             instancedPalmsTrunk.setMatrixAt(treesPlaced, matrix);
             instancedPalmsLeaves.setMatrixAt(treesPlaced, matrix);
             instancedPalmsCoconuts.setMatrixAt(treesPlaced, matrix);
+            
+            palmInstances.push({
+                x: wx,
+                y: y,
+                z: wz,
+                rotationY: rotationY,
+                scale: sc,
+                velocityY: 0,
+                falling: false
+            });
             
             spawnedPositions.push({ x: wx, z: wz });
             treesPlaced++;
@@ -1406,15 +1438,28 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         // Spawn pine trees on mountain slopes (20.0m up to 55.0m)
         if (groundHeight >= 20.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.5)) {
-            const position = new THREE.Vector3(wx, groundHeight - 0.15, wz);
+            const y = groundHeight - 0.15;
+            const rotationY = Math.random() * Math.PI * 2;
             const sc = 0.85 + Math.random() * 0.45;
+            
+            const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(sc, sc, sc);
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * Math.PI * 2, 0));
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
             
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
             
             instancedPinesTrunk.setMatrixAt(pinesPlaced, matrix);
             instancedPinesFoliage.setMatrixAt(pinesPlaced, matrix);
+            
+            pineInstances.push({
+                x: wx,
+                y: y,
+                z: wz,
+                rotationY: rotationY,
+                scale: sc,
+                velocityY: 0,
+                falling: false
+            });
             
             spawnedPositions.push({ x: wx, z: wz });
             pinesPlaced++;
@@ -1435,21 +1480,35 @@ function spawnEnvironmentObjects(scene, terrain) {
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 32);
         
         if (groundHeight > 7.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.0)) {
-            const position = new THREE.Vector3(wx, groundHeight - 0.25, wz);
-            const scale = new THREE.Vector3(
-                0.8 + Math.random() * 1.0,
-                0.5 + Math.random() * 0.7,
-                0.8 + Math.random() * 1.0
-            );
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-                Math.random() * Math.PI,
-                Math.random() * Math.PI,
-                Math.random() * Math.PI
-            ));
+            const y = groundHeight - 0.25;
+            const scaleX = 0.8 + Math.random() * 1.0;
+            const scaleY = 0.5 + Math.random() * 0.7;
+            const scaleZ = 0.8 + Math.random() * 1.0;
+            const rotX = Math.random() * Math.PI;
+            const rotY = Math.random() * Math.PI;
+            const rotZ = Math.random() * Math.PI;
+            
+            const position = new THREE.Vector3(wx, y, wz);
+            const scale = new THREE.Vector3(scaleX, scaleY, scaleZ);
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, rotZ));
             
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
             
             instancedRocks.setMatrixAt(rocksPlaced, matrix);
+            
+            rockInstances.push({
+                x: wx,
+                y: y,
+                z: wz,
+                rotX: rotX,
+                rotY: rotY,
+                rotZ: rotZ,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                scaleZ: scaleZ,
+                velocityY: 0,
+                falling: false
+            });
             
             spawnedPositions.push({ x: wx, z: wz });
             rocksPlaced++;
@@ -1517,5 +1576,151 @@ function updateHeightmap() {
         }
     } else {
         heightmapTexture.needsUpdate = true;
+    }
+}
+
+function checkFoliageFalling() {
+    if (!terrain) return;
+    
+    // Check palms
+    for (let i = 0; i < palmInstances.length; i++) {
+        const inst = palmInstances[i];
+        if (inst.falling) continue;
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.1;
+        if (inst.y > targetY + 0.1) {
+            inst.falling = true;
+            inst.velocityY = 0;
+        }
+    }
+    
+    // Check pines
+    for (let i = 0; i < pineInstances.length; i++) {
+        const inst = pineInstances[i];
+        if (inst.falling) continue;
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.15;
+        if (inst.y > targetY + 0.1) {
+            inst.falling = true;
+            inst.velocityY = 0;
+        }
+    }
+    
+    // Check rocks
+    for (let i = 0; i < rockInstances.length; i++) {
+        const inst = rockInstances[i];
+        if (inst.falling) continue;
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.25;
+        if (inst.y > targetY + 0.1) {
+            inst.falling = true;
+            inst.velocityY = 0;
+        }
+    }
+}
+
+function updateFoliagePhysics(delta) {
+    let palmUpdated = false;
+    let pineUpdated = false;
+    let rockUpdated = false;
+    
+    const gravityForce = 9.81;
+    
+    // Update palms
+    for (let i = 0; i < palmInstances.length; i++) {
+        const inst = palmInstances[i];
+        if (!inst.falling) continue;
+        
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.1;
+        
+        inst.velocityY -= gravityForce * delta;
+        inst.y += inst.velocityY * delta;
+        
+        if (inst.y <= targetY) {
+            inst.y = targetY;
+            inst.velocityY = 0;
+            inst.falling = false;
+        }
+        
+        const position = new THREE.Vector3(inst.x, inst.y, inst.z);
+        const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, inst.rotationY, 0));
+        const scale = new THREE.Vector3(inst.scale, inst.scale, inst.scale);
+        const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+        
+        instancedPalmsTrunk.setMatrixAt(i, matrix);
+        instancedPalmsLeaves.setMatrixAt(i, matrix);
+        instancedPalmsCoconuts.setMatrixAt(i, matrix);
+        palmUpdated = true;
+    }
+    
+    // Update pines
+    for (let i = 0; i < pineInstances.length; i++) {
+        const inst = pineInstances[i];
+        if (!inst.falling) continue;
+        
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.15;
+        
+        inst.velocityY -= gravityForce * delta;
+        inst.y += inst.velocityY * delta;
+        
+        if (inst.y <= targetY) {
+            inst.y = targetY;
+            inst.velocityY = 0;
+            inst.falling = false;
+        }
+        
+        const position = new THREE.Vector3(inst.x, inst.y, inst.z);
+        const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, inst.rotationY, 0));
+        const scale = new THREE.Vector3(inst.scale, inst.scale, inst.scale);
+        const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+        
+        instancedPinesTrunk.setMatrixAt(i, matrix);
+        instancedPinesFoliage.setMatrixAt(i, matrix);
+        pineUpdated = true;
+    }
+    
+    // Update rocks
+    for (let i = 0; i < rockInstances.length; i++) {
+        const inst = rockInstances[i];
+        if (!inst.falling) continue;
+        
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(inst.x, 0, inst.z), 32);
+        const targetY = groundHeight - 0.25;
+        
+        inst.velocityY -= gravityForce * delta;
+        inst.y += inst.velocityY * delta;
+        
+        if (inst.y <= targetY) {
+            inst.y = targetY;
+            inst.velocityY = 0;
+            inst.falling = false;
+        }
+        
+        const position = new THREE.Vector3(inst.x, inst.y, inst.z);
+        const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(inst.rotX, inst.rotY, inst.rotZ));
+        const scale = new THREE.Vector3(inst.scaleX, inst.scaleY, inst.scaleZ);
+        const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+        
+        instancedRocks.setMatrixAt(i, matrix);
+        rockUpdated = true;
+    }
+    
+    if (palmUpdated) {
+        instancedPalmsTrunk.instanceMatrix.needsUpdate = true;
+        instancedPalmsLeaves.instanceMatrix.needsUpdate = true;
+        instancedPalmsCoconuts.instanceMatrix.needsUpdate = true;
+    }
+    if (pineUpdated) {
+        instancedPinesTrunk.instanceMatrix.needsUpdate = true;
+        instancedPinesFoliage.instanceMatrix.needsUpdate = true;
+    }
+    if (rockUpdated) {
+        instancedRocks.instanceMatrix.needsUpdate = true;
+    }
+    
+    if (palmUpdated || pineUpdated || rockUpdated) {
+        renderer.shadowMap.needsUpdate = true;
     }
 }
