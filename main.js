@@ -11,7 +11,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun, heightmapTexture, heightmapData;
 let controls;
-let spear, pickaxe, isDiggingAnim = false, animTime = 0;
+let spear, pickaxe, manipulator, isDiggingAnim = false, animTime = 0;
 let activeSlot = 1;
 let clouds = [];
 let gameStarted = false;
@@ -461,6 +461,74 @@ function init() {
     pickaxe.visible = false;
     camera.add(pickaxe);
 
+    // 7bb2. First-Person Matter Manipulator (View Model) Setup
+    manipulator = new THREE.Group();
+    
+    // Materials
+    const darkGreyMat = new THREE.MeshStandardMaterial({ color: 0x2d3436, flatShading: true, roughness: 0.7 });
+    const whiteMetalMat = new THREE.MeshStandardMaterial({ color: 0xdfe6e9, flatShading: true, roughness: 0.4, metalness: 0.8 });
+    const orangeMat = new THREE.MeshStandardMaterial({ color: 0xffa502, flatShading: true, roughness: 0.3, emissive: 0xffa502, emissiveIntensity: 0.5 });
+    const purpleMat = new THREE.MeshStandardMaterial({ color: 0xa29bfe, flatShading: true, roughness: 0.1, emissive: 0x9b59b6, emissiveIntensity: 0.8 });
+    const cyanMat = new THREE.MeshStandardMaterial({ color: 0x00d2d3, flatShading: true, roughness: 0.2, emissive: 0x00d2d3, emissiveIntensity: 0.7 });
+
+    // Handle/Grip (cylinder pointing down)
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.15, 6), darkGreyMat);
+    handle.position.set(0, -0.08, 0);
+    handle.rotation.x = 0.2; // Slightly angled forward
+    manipulator.add(handle);
+    
+    // Main body tube (cylinder pointing forward)
+    const bodyTube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.24, 6), darkGreyMat);
+    bodyTube.rotation.x = Math.PI / 2;
+    bodyTube.position.z = -0.05;
+    manipulator.add(bodyTube);
+
+    // Purple core orb in the center (sphere)
+    const coreOrb = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 8), purpleMat);
+    coreOrb.position.set(0, 0.01, -0.05);
+    manipulator.add(coreOrb);
+
+    // White outer armor braces (2 arched boxes wrapping the core)
+    const braceLeft = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.03, 0.12), whiteMetalMat);
+    braceLeft.position.set(-0.03, 0.01, -0.05);
+    braceLeft.rotation.y = 0.15;
+    manipulator.add(braceLeft);
+
+    const braceRight = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.03, 0.12), whiteMetalMat);
+    braceRight.position.set(0.03, 0.01, -0.05);
+    braceRight.rotation.y = -0.15;
+    manipulator.add(braceRight);
+
+    // Front Cyan Ring muzzle
+    const muzzleRing = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.025, 8, 1, true), cyanMat);
+    muzzleRing.rotation.x = Math.PI / 2;
+    muzzleRing.position.z = -0.17;
+    manipulator.add(muzzleRing);
+
+    // Muzzle tip core
+    const muzzleTip = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.03, 6), darkGreyMat);
+    muzzleTip.rotation.x = Math.PI / 2;
+    muzzleTip.position.z = -0.18;
+    manipulator.add(muzzleTip);
+
+    // Rear Orange reactor disc
+    const reactorDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.02, 10), orangeMat);
+    reactorDisc.rotation.x = Math.PI / 2;
+    reactorDisc.position.z = 0.07;
+    manipulator.add(reactorDisc);
+
+    // Rear exhaust/cap (tapered dark grey cylinder at the very back)
+    const exhaustCap = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.032, 0.03, 8), darkGreyMat);
+    exhaustCap.rotation.x = Math.PI / 2;
+    exhaustCap.position.z = 0.09;
+    manipulator.add(exhaustCap);
+
+    // Position relative to camera (bottom-right)
+    manipulator.position.set(0.35, -0.32, -0.65);
+    manipulator.rotation.set(-0.15, -0.15, 0); // Leaning in
+    manipulator.visible = false;
+    camera.add(manipulator);
+
     // 7bc. Low-Poly Floating Clouds Setup (matches low-poly sample screenshots)
     const cloudsGroup = new THREE.Group();
     scene.add(cloudsGroup);
@@ -530,19 +598,26 @@ function init() {
         if (slotNum === 1) {
             if (spear) spear.visible = true;
             if (pickaxe) pickaxe.visible = false;
+            if (manipulator) manipulator.visible = false;
         } else if (slotNum === 7) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = true;
+            if (manipulator) manipulator.visible = false;
+        } else if (slotNum === 9) {
+            if (spear) spear.visible = false;
+            if (pickaxe) pickaxe.visible = false;
+            if (manipulator) manipulator.visible = true;
         } else {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
+            if (manipulator) manipulator.visible = false;
         }
     }
     
-    // Listen for keys 1 to 8
+    // Listen for keys 1 to 9
     window.addEventListener('keydown', (event) => {
         const key = event.key;
-        if (key >= '1' && key <= '8') {
+        if (key >= '1' && key <= '9') {
             selectSlot(parseInt(key));
         }
     });
@@ -838,6 +913,12 @@ function onWindowResize() {
 // Perform raycasting and modify terrain
 function handleTerrainInteraction() {
     if (isMobile ? !gameStarted : !controls.isLocked) return;
+    if (activeSlot !== 9) {
+        isDigging = false;
+        isBuilding = false;
+        crosshair.classList.remove('active');
+        return;
+    }
     if (!isDigging && !isBuilding) return;
 
     const now = performance.now();
@@ -1142,7 +1223,7 @@ function animate() {
 
     // 5c. Active Tool swing animation tick (First Person stabbing/swinging effect)
     if (isDiggingAnim) {
-        const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : null);
+        const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : ((activeSlot === 9) ? manipulator : null));
         if (tool) {
             animTime += delta * 15.0; // Speed of swing
             if (animTime < Math.PI) {
@@ -1154,8 +1235,13 @@ function animate() {
             } else {
                 isDiggingAnim = false;
                 // Reset to default resting position
-                tool.position.set(0.35, -0.35, -0.6);
-                tool.rotation.set(-0.25, -0.25, 0);
+                if (tool === manipulator) {
+                    tool.position.set(0.35, -0.32, -0.65);
+                    tool.rotation.set(-0.15, -0.15, 0);
+                } else {
+                    tool.position.set(0.35, -0.35, -0.6);
+                    tool.rotation.set(-0.25, -0.25, 0);
+                }
             }
         } else {
             // No tool visible for this slot, reset animation flag immediately
@@ -1163,7 +1249,7 @@ function animate() {
         }
     } else {
         // Rest state tool breathing and walking sway
-        const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : null);
+        const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : ((activeSlot === 9) ? manipulator : null));
         if (tool) {
             const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
             const inWater = camera.position.y < 120.0;
@@ -1173,15 +1259,27 @@ function animate() {
                 const bobSwayX = Math.cos(bobTime) * (keyStates.ShiftLeft ? 0.055 : 0.028);
                 const bobSwayY = Math.sin(bobTime * 2.0) * (keyStates.ShiftLeft ? 0.035 : 0.018);
                 
-                tool.position.set(0.35 + bobSwayX, -0.35 + bobSwayY, -0.6);
+                if (tool === manipulator) {
+                    tool.position.set(0.35 + bobSwayX, -0.32 + bobSwayY, -0.65);
+                } else {
+                    tool.position.set(0.35 + bobSwayX, -0.35 + bobSwayY, -0.6);
+                }
             } else {
                 // Breathing sway (gentle idle breathing)
                 const breatheTime = performance.now() * 0.0018;
                 const breatheY = Math.sin(breatheTime) * 0.008;
-                tool.position.set(0.35, -0.35 + breatheY, -0.6);
+                if (tool === manipulator) {
+                    tool.position.set(0.35, -0.32 + breatheY, -0.65);
+                } else {
+                    tool.position.set(0.35, -0.35 + breatheY, -0.6);
+                }
             }
             // Ensure rotation is reset back to default resting rotation
-            tool.rotation.set(-0.25, -0.25, 0);
+            if (tool === manipulator) {
+                tool.rotation.set(-0.15, -0.15, 0);
+            } else {
+                tool.rotation.set(-0.25, -0.25, 0);
+            }
         }
     }
 
