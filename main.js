@@ -255,8 +255,8 @@ function init() {
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Map world position XZ to heightmap UV (footprint 384x384 centered at 0,0)
-         vec2 heightmapUV = (worldPosition.xz + 192.0) / 384.0;
+        `// Map world position XZ to heightmap UV (footprint 768x768 centered at 0,0)
+         vec2 heightmapUV = (worldPosition.xz + 384.0) / 768.0;
          float foamIntensity = 0.0;
          if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
              float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 192.0;
@@ -287,11 +287,11 @@ function init() {
     scene.add(water);
 
     // 6. Marching Cubes Voxel Terrain Setup
-    // Footprint: Width = 128, Height = 64, Depth = 128, VoxelScale = 3.0 (total island footprint: 384m x 192m x 384m)
-    terrain = new VoxelTerrain(scene, 128, 64, 128, 3.0);
+    // Footprint: Width = 256, Height = 64, Depth = 256, VoxelScale = 3.0 (total island footprint: 768m x 192m x 768m)
+    terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
 
     // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
-    heightmapData = new Uint8Array(128 * 128);
+    heightmapData = new Uint8Array(256 * 256);
     updateHeightmap();
 
     // Position player safely on the beach of the larger island
@@ -506,7 +506,7 @@ function init() {
         const range = 1200;
         cloud.position.set(
             (Math.random() - 0.5) * range,
-            120 + Math.random() * 70,
+            220 + Math.random() * 80,
             (Math.random() - 0.5) * range
         );
         cloud.userData = { speed: 0.3 + Math.random() * 1.2 };
@@ -1811,9 +1811,9 @@ function spawnEnvironmentObjects(scene, terrain) {
 
 function updateHeightmap() {
     if (!terrain) return;
-    const width = 128;
+    const width = 256;
     const height = 64;
-    const depth = 128;
+    const depth = 256;
     const scale = 3.0; // voxelScale
     
     // Scan density values directly from top to bottom (very fast, no 3D raycasting/binary search)

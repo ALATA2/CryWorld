@@ -105,7 +105,7 @@ class PerlinNoise {
 // ==========================================
 // TERRAIN HELPERS & STATIC ALLOCATIONS
 // ==========================================
-const _sandColor = new THREE.Color(0xf6f5e9); // Pure white coral sand
+const _sandColor = new THREE.Color(0xfffdf0); // Ultra bright white coral sand (Maldives style)
 const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
 const _seabedColor = new THREE.Color(0x0096b2); // Vibrant tropical turquoise-blue
@@ -154,36 +154,35 @@ function getNormalAt(terrain, vx, vy, vz, target) {
     return target.set(-dx / len, -dy / len, -dz / len).normalize();
 }
 
-function getColorAt(vy, normal, target) {
+function getColorAt(worldY, normal, target) {
     const slope = normal.y; // 1.0 = flat upwards, 0.0 = vertical wall
     
     if (slope < 0.60) {
-        // Very steep cliffs are always dark volcanic rock
+        // Very steep cliffs are always light grey granite rock
         target.copy(_rockColor);
     } else {
-        // Sand Beach level
-        if (vy < 4.8) {
-            // Under sea level Y=8.0 (which corresponds to vy = 2.66 in voxel indices)
-            if (vy < 2.66) {
+        // Maldives style beach (sea level is 120.0m)
+        if (worldY < 125.0) {
+            // Under sea level Y=120.0m
+            if (worldY < 120.0) {
                 // Seabed: transition sand color into a tropical turquoise color to avoid flat white/grey square under water
-                const depthFactor = Math.min((2.66 - vy) / 2.66, 1.0);
+                const depthFactor = Math.min((120.0 - worldY) / 120.0, 1.0);
                 target.lerpColors(_sandColor, _seabedColor, depthFactor);
             } else {
                 target.copy(_sandColor);
             }
-        } else if (vy < 5.8) {
-            // Beach to grass transition
-            const t = (vy - 4.8);
+        } else if (worldY < 128.0) {
+            // Beach to grass transition (125m to 128m)
+            const t = (worldY - 125.0) / 3.0;
             target.lerpColors(_sandColor, _grassColor, t);
-        } else if (vy < 18.0) {
+        } else if (worldY < 155.0) {
             // Grass slopes
             target.copy(_grassColor);
-        } else if (vy < 22.0) {
-            // Grass to Volcanic rock transition
-            const t = (vy - 18.0) / 4.0;
+        } else if (worldY < 165.0) {
+            // Grass to rock transition
+            const t = (worldY - 155.0) / 10.0;
             target.lerpColors(_grassColor, _rockColor, t);
         } else {
-            // Peak volcanic cone
             target.copy(_rockColor);
         }
         
@@ -315,13 +314,13 @@ class VoxelChunk {
 
                         // Colors
                         _tempNormal.set(n0x, n0y, n0z);
-                        getColorAt(pt0.y, _tempNormal, _tempColor0);
+                        getColorAt(pt0.y * voxelScale, _tempNormal, _tempColor0);
                         
                         _tempNormal.set(n1x, n1y, n1z);
-                        getColorAt(pt1.y, _tempNormal, _tempColor1);
+                        getColorAt(pt1.y * voxelScale, _tempNormal, _tempColor1);
                         
                         _tempNormal.set(n2x, n2y, n2z);
-                        getColorAt(pt2.y, _tempNormal, _tempColor2);
+                        getColorAt(pt2.y * voxelScale, _tempNormal, _tempColor2);
 
                         // Push geometries scaled to physical meters
                         positions.push(
@@ -457,17 +456,17 @@ export class VoxelTerrain {
 
         for (let x = 0; x < this.width; x++) {
             for (let z = 0; z < this.depth; z++) {
-                // Circular distance from island center
-                const dx = (x - cx) / cx;
-                const dz = (z - cz) / cz;
+                // Circular distance from island center (relative to 64.0 to preserve absolute scale on 256x256 grid)
+                const dx = (x - cx) / 64.0;
+                const dz = (z - cz) / 64.0;
                 const distFromCenter = Math.sqrt(dx * dx + dz * dz);
                 
-                // Falloff weight above water: 1.0 at center, drops to 0.0 around distance 0.85
+                // Falloff weight above water: 1.0 at center, drops to 0.0 around distance 0.85 (54.4 voxels)
                 const islandWeightAbove = Math.max(0.0, 1.0 - distFromCenter / 0.85);
                 const smoothWeightAbove = Math.pow(islandWeightAbove, 1.3);
 
-                // Falloff weight below water (wider base): drops to 0.0 around distance 0.98
-                const islandWeightBelow = Math.max(0.0, 1.0 - distFromCenter / 0.98);
+                // Falloff weight below water (wider base): drops to 0.0 around distance 1.85 (118.4 voxels)
+                const islandWeightBelow = Math.max(0.0, 1.0 - distFromCenter / 1.85);
                 const smoothWeightBelow = Math.pow(islandWeightBelow, 1.3);
 
                 // Base terrain height factor using Perlin Noise fBm
@@ -475,31 +474,24 @@ export class VoxelTerrain {
                 const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
                 const baseHeightRaw = 4.0 + n1 + n2;
 
-                // Volcano Cone (placed at center-left: 38% width, 45% depth)
-                const vdx = x - (this.width * 0.38);
-                const vdz = z - (this.depth * 0.45);
+                // Gentle Maldives sand dune/hill instead of a volcanic peak
+                const vdx = x - (cx - 15.0);
+                const vdz = z - (cz - 6.0);
                 const vDist = Math.sqrt(vdx * vdx + vdz * vdz);
                 let volcanoHeight = 0;
-                if (vDist < 40.0) {
-                    const t = 1.0 - vDist / 40.0;
-                    volcanoHeight = 22.0 * Math.pow(t, 1.4); // High cone
-                    
-                    // Crater (subtracted at the peak)
-                    if (vDist < 8.0) {
-                        const cT = 1.0 - vDist / 8.0;
-                        const craterDepth = 15.0 * Math.pow(cT, 2.0); // Sharp drop
-                        volcanoHeight -= craterDepth;
-                    }
+                if (vDist < 25.0) {
+                    const t = 1.0 - vDist / 25.0;
+                    volcanoHeight = 3.5 * Math.pow(t, 1.4); // Very low, soft sandy hill
                 }
 
-                // Flat Plain Zone (placed at center-right: 68% width, 52% depth)
-                const pdx = x - (this.width * 0.68);
-                const pdz = z - (this.depth * 0.52);
+                // Flat Plain Zone (placed at center-right)
+                const pdx = x - (cx + 23.0);
+                const pdz = z - (cz + 2.0);
                 const pDist = Math.sqrt(pdx * pdx + pdz * pdz);
                 let plainHeight = 0;
-                if (pDist < 45.0) {
-                    const t = 1.0 - pDist / 45.0;
-                    plainHeight = 4.5 * Math.pow(t, 2.0); // Gentle, flat elevation
+                if (pDist < 35.0) {
+                    const t = 1.0 - pDist / 35.0;
+                    plainHeight = 2.0 * Math.pow(t, 2.0); // Very low plain
                 }
 
                 for (let y = 0; y < this.height; y++) {
