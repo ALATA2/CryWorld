@@ -255,11 +255,11 @@ function init() {
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Map world position XZ to heightmap UV (footprint 1024x1024 centered at 0,0)
-         vec2 heightmapUV = (worldPosition.xz + 512.0) / 1024.0;
+        `// Map world position XZ to heightmap UV (footprint 384x384 centered at 0,0)
+         vec2 heightmapUV = (worldPosition.xz + 192.0) / 384.0;
          float foamIntensity = 0.0;
          if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
-             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 256.0;
+             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 240.0;
              float waterDepth = 120.0 - groundHeight;
              
              // If shallow, generate waves breaking against the shore/object
@@ -287,8 +287,8 @@ function init() {
     scene.add(water);
 
     // 6. Marching Cubes Voxel Terrain Setup
-    // Expanding island footprint: Width = 128, Height = 32, Depth = 128, VoxelScale = 8.0 (total island footprint: 1024m x 256m x 1024m)
-    terrain = new VoxelTerrain(scene, 128, 32, 128, 8.0);
+    // Footprint: Width = 128, Height = 80, Depth = 128, VoxelScale = 3.0 (total island footprint: 384m x 240m x 384m)
+    terrain = new VoxelTerrain(scene, 128, 80, 128, 3.0);
 
     // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
     heightmapData = new Uint8Array(128 * 128);
@@ -298,7 +298,7 @@ function init() {
     const startX = 0;
     const startZ = 45;
     const testPos = new THREE.Vector3(startX, 130, startZ);
-    const groundY = terrain.getSurfaceHeight(testPos, 256.0);
+    const groundY = terrain.getSurfaceHeight(testPos, 240.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
 
     // 7. Player Controls (First Person) Setup
