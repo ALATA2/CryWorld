@@ -220,7 +220,7 @@ function init() {
         }
     );
     water.rotation.x = -Math.PI / 2;
-    water.position.y = 8.0; // Sea level at Y = 8.0 meters
+    water.position.y = 120.0; // Sea level at Y = 120.0 meters
     
     // Make water double-sided so you can see the surface from underneath and enable blending
     water.material.side = THREE.DoubleSide;
@@ -229,7 +229,7 @@ function init() {
     // Optimize: Skip reflection rendering pass if camera is underwater (since reflections are invisible from below)
     const originalOnBeforeRender = water.onBeforeRender;
     water.onBeforeRender = function(renderer, scene, camera) {
-        if (camera.position.y < 8.0) return; // Skip mirror pass!
+        if (camera.position.y < 120.0) return; // Skip mirror pass!
         originalOnBeforeRender.call(this, renderer, scene, camera);
     };
 
@@ -255,12 +255,12 @@ function init() {
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Map world position XZ to heightmap UV (footprint 384x384 centered at 0,0)
-         vec2 heightmapUV = (worldPosition.xz + 192.0) / 384.0;
+        `// Map world position XZ to heightmap UV (footprint 1024x1024 centered at 0,0)
+         vec2 heightmapUV = (worldPosition.xz + 512.0) / 1024.0;
          float foamIntensity = 0.0;
          if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
-             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 96.0;
-             float waterDepth = 8.0 - groundHeight;
+             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 256.0;
+             float waterDepth = 120.0 - groundHeight;
              
              // If shallow, generate waves breaking against the shore/object
              if (waterDepth > 0.0 && waterDepth < 2.2) {
@@ -287,8 +287,8 @@ function init() {
     scene.add(water);
 
     // 6. Marching Cubes Voxel Terrain Setup
-    // Tripled footprint: Width = 128, Height = 32, Depth = 128, VoxelScale = 3.0 (total island footprint: 384m x 96m x 384m)
-    terrain = new VoxelTerrain(scene, 128, 32, 128, 3.0);
+    // Expanding island footprint: Width = 128, Height = 32, Depth = 128, VoxelScale = 8.0 (total island footprint: 1024m x 256m x 1024m)
+    terrain = new VoxelTerrain(scene, 128, 32, 128, 8.0);
 
     // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
     heightmapData = new Uint8Array(128 * 128);
@@ -297,8 +297,8 @@ function init() {
     // Position player safely on the beach of the larger island
     const startX = 0;
     const startZ = 45;
-    const testPos = new THREE.Vector3(startX, 20, startZ);
-    const groundY = terrain.getSurfaceHeight(testPos, 32);
+    const testPos = new THREE.Vector3(startX, 130, startZ);
+    const groundY = terrain.getSurfaceHeight(testPos, 256.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
 
     // 7. Player Controls (First Person) Setup
@@ -391,7 +391,7 @@ function init() {
         
         // Reset player coordinates to start beach position
         const resetPos = new THREE.Vector3(startX, 20, startZ);
-        const resetY = terrain.getSurfaceHeight(resetPos, 32);
+        const resetY = terrain.getSurfaceHeight(resetPos, 256.0);
         camera.position.set(startX, resetY + playerHeight, startZ);
         velocity.set(0, 0, 0);
     });
@@ -901,7 +901,7 @@ function animate() {
         handleTerrainInteraction();
 
         // 3. Movement Physics (Gravity & Collisions)
-        const inWater = camera.position.y < 8.0;
+        const inWater = camera.position.y < 120.0;
         
         // Walk controls dampening (less horizontal drag in water to glide)
         const dragFactor = inWater ? 6.0 : 10.0;
@@ -956,7 +956,7 @@ function animate() {
                 velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
             } else if (!keyStates.Space) {
                 // Buoyancy: slowly float up to the surface if idle
-                const floatSurface = 7.95; // target eye level at surface
+                const floatSurface = 119.95; // target eye level at surface
                 if (camera.position.y < floatSurface) {
                     const diff = floatSurface - camera.position.y;
                     velocity.y += diff * 1.5 * delta;
@@ -1088,18 +1088,18 @@ function animate() {
         }
 
         // 4. Update HUD Coordinates (meters scaled)
-        posInfo.textContent = `X: ${Math.round(camera.position.x)} Y: ${Math.round(camera.position.y - 8.0)} Z: ${Math.round(camera.position.z)}`;
+        posInfo.textContent = `X: ${Math.round(camera.position.x)} Y: ${Math.round(camera.position.y - 120.0)} Z: ${Math.round(camera.position.z)}`;
     }
 
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
     water.material.uniforms['time'].value += delta * 0.12;
 
-    // 5bb. Check if player camera is underwater (Y < 8.0m) to trigger immersive effects
+    // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
-    if (camera.position.y < 8.0) {
-        const depth = 8.0 - camera.position.y;
-        // Maximum effect reached at 3.5m depth
-        const depthFactor = Math.min(depth / 3.5, 1.0);
+    if (camera.position.y < 120.0) {
+        const depth = 120.0 - camera.position.y;
+        // Maximum effect reached at 60m depth
+        const depthFactor = Math.min(depth / 60.0, 1.0);
 
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
@@ -1166,7 +1166,7 @@ function animate() {
         const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : null);
         if (tool) {
             const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
-            const inWater = camera.position.y < 8.0;
+            const inWater = camera.position.y < 120.0;
             if (isGrounded && isMoving && !inWater) {
                 // Walking/running sway matching the head bobbing frequency
                 const speedFactor = keyStates.ShiftLeft ? 1.45 : 1.0;
@@ -1667,10 +1667,10 @@ function spawnEnvironmentObjects(scene, terrain) {
         const wz = vz * terrain.voxelScale;
         
         // Sample height from global height map
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 32);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 256.0);
         
-        // Spawn range: between 9.0m (beaches) and 20.0m (lower plains), keeping spacing
-        if (groundHeight > 8.8 && groundHeight < 20.0 && isFarEnough(wx, wz, 5.0)) {
+        // Spawn range: between 121.5m (beaches) and 136.0m, keeping spacing
+        if (groundHeight > 121.5 && groundHeight < 136.0 && isFarEnough(wx, wz, 5.0)) {
             const y = groundHeight - 0.1;
             const rotationY = Math.random() * Math.PI * 2;
             const sc = 0.8 + Math.random() * 0.45;
@@ -1711,10 +1711,10 @@ function spawnEnvironmentObjects(scene, terrain) {
         const wx = vx * terrain.voxelScale;
         const wz = vz * terrain.voxelScale;
         
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 32);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 256.0);
         
-        // Spawn pine trees on mountain slopes (20.0m up to 55.0m)
-        if (groundHeight >= 20.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.5)) {
+        // Spawn pine trees on mountain slopes (136.0m up to 210.0m)
+        if (groundHeight >= 136.0 && groundHeight < 210.0 && isFarEnough(wx, wz, 4.5)) {
             const y = groundHeight - 0.15;
             const rotationY = Math.random() * Math.PI * 2;
             const sc = 0.85 + Math.random() * 0.45;
@@ -1754,9 +1754,9 @@ function spawnEnvironmentObjects(scene, terrain) {
         const wx = vx * terrain.voxelScale;
         const wz = vz * terrain.voxelScale;
         
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 32);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 256.0);
         
-        if (groundHeight > 7.0 && groundHeight < 55.0 && isFarEnough(wx, wz, 4.0)) {
+        if (groundHeight > 110.0 && groundHeight < 230.0 && isFarEnough(wx, wz, 4.0)) {
             const y = groundHeight - 0.25;
             const scaleX = 0.8 + Math.random() * 1.0;
             const scaleY = 0.5 + Math.random() * 0.7;
@@ -1814,7 +1814,7 @@ function updateHeightmap() {
     const width = 128;
     const height = 32;
     const depth = 128;
-    const scale = 3.0; // voxelScale
+    const scale = 8.0; // voxelScale
     
     // Scan density values directly from top to bottom (very fast, no 3D raycasting/binary search)
     const densities = terrain.densities;
@@ -1831,7 +1831,7 @@ function updateHeightmap() {
             }
             // Convert local voxel Y coordinate to world height (meters)
             const h = surfaceY * scale;
-            const norm = Math.max(0.0, Math.min(96.0, h)) / 96.0;
+            const norm = Math.max(0.0, Math.min(256.0, h)) / 256.0;
             heightmapData[x + z * width] = Math.floor(norm * 255);
         }
     }
@@ -1864,7 +1864,7 @@ function checkFoliageFalling() {
         const inst = palmInstances[i];
         if (inst.falling) continue;
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.1;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1877,7 +1877,7 @@ function checkFoliageFalling() {
         const inst = pineInstances[i];
         if (inst.falling) continue;
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.15;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1890,7 +1890,7 @@ function checkFoliageFalling() {
         const inst = rockInstances[i];
         if (inst.falling) continue;
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.25;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -1912,7 +1912,7 @@ function updateFoliagePhysics(delta) {
         if (!inst.falling) continue;
         
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.1;
         
         inst.velocityY -= gravityForce * delta;
@@ -1941,7 +1941,7 @@ function updateFoliagePhysics(delta) {
         if (!inst.falling) continue;
         
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.15;
         
         inst.velocityY -= gravityForce * delta;
@@ -1969,7 +1969,7 @@ function updateFoliagePhysics(delta) {
         if (!inst.falling) continue;
         
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 32);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 256.0);
         const targetY = groundHeight - 0.25;
         
         inst.velocityY -= gravityForce * delta;

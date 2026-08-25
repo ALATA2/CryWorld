@@ -498,7 +498,7 @@ export class VoxelTerrain {
                     plainHeight = 4.5 * Math.pow(t, 2.0); // Gentle, flat elevation
                 }
 
-                const finalHeight = baseHeight + (volcanoHeight + plainHeight) * smoothWeight;
+                const finalHeight = (13.0 + baseHeight * 0.5 + volcanoHeight * 0.6 + plainHeight * 0.8) * smoothWeight;
 
                 for (let y = 0; y < this.height; y++) {
                     const idx = x + y * this.width + z * this.width * this.height;
