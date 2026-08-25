@@ -1124,8 +1124,13 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         for (let i = 0; i < trunkSegmentsCount; i++) {
             const h = 1.1;
-            const rBottom = 0.4 * (1.0 - i / (trunkSegmentsCount + 3));
-            const rTop = 0.4 * (1.0 - (i + 1) / (trunkSegmentsCount + 3));
+            let rBottom = 0.32 * (1.0 - i / (trunkSegmentsCount + 3));
+            let rTop = 0.32 * (1.0 - (i + 1) / (trunkSegmentsCount + 3));
+            
+            // Flared base foot for coconut palm (referencing photo 1)
+            if (i === 0) {
+                rBottom = rBottom * 1.95;
+            }
             
             const segmentGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 5);
             const segment = new THREE.Mesh(segmentGeo, trunkMat);
@@ -1193,14 +1198,14 @@ function spawnEnvironmentObjects(scene, terrain) {
                 stemPart.rotation.x = -rotX;
                 leaf.add(stemPart);
                 
-                // Add leaflets along this stem segment (feathered comb pattern)
-                const leafletsPerSeg = 3;
+                // Add leaflets along this stem segment (feathered comb pattern, dense as in photo)
+                const leafletsPerSeg = 4;
                 for (let f = 0; f < leafletsPerSeg; f++) {
                     const segmentProgress = (j * leafletsPerSeg + f) / (stemSegments * leafletsPerSeg); // 0 to 1 along the whole leaf
-                    const leafletLength = 1.1 * Math.sin(segmentProgress * Math.PI); // Longest in middle, tapered
+                    const leafletLength = 1.3 * Math.sin(segmentProgress * Math.PI); // Longest in middle, tapered
                     if (leafletLength < 0.15) continue;
                     
-                    const leafletW = 0.08 * (1.0 - segmentProgress * 0.4); // Taper width towards tip
+                    const leafletW = 0.07 * (1.0 - segmentProgress * 0.4); // Taper width towards tip
                     const leafletGeo = new THREE.BoxGeometry(leafletW, 0.006, leafletLength);
                     const zOffset = (f / leafletsPerSeg) * stemL;
                     
@@ -1256,52 +1261,113 @@ function spawnEnvironmentObjects(scene, terrain) {
         return treeGroup;
     }
     
-    // Procedural low-poly Pine Tree generator (matches conifer pine in screenshot 1 and 3)
+    // Procedural low-poly Maritime Pine generator (referencing photo 2: Pino Marittimo)
     function createPineTree() {
         const treeGroup = new THREE.Group();
         
-        // Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.08, 0.28, 5.0, 4);
         const trunkMat = new THREE.MeshStandardMaterial({
             color: 0x8d7a6b, // Light grey-brown wood
             flatShading: true,
             roughness: 0.95
         });
-        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 2.5;
-        trunk.castShadow = true;
-        trunk.receiveShadow = true;
-        treeGroup.add(trunk);
-        
-        // Foliage cones (5 stacked conifer skirts with broken symmetry)
         const foliageMat = new THREE.MeshStandardMaterial({
-            color: 0x27ae60, // Bright conifer pine green
+            color: 0x27ae60, // Maritime pine green
             flatShading: true,
             roughness: 0.85
         });
         
-        const skirtsCount = 5;
-        const baseRadii = [1.6, 1.35, 1.1, 0.8, 0.5];
-        const baseHeights = [1.9, 1.6, 1.3, 1.0, 0.75];
-        const baseHeightsY = [2.0, 3.1, 4.0, 4.8, 5.4];
+        // 1. Lower Trunk (Gnarled, curves upward)
+        let curY = 0;
+        let curX = 0;
+        let curZ = 0;
+        const trunkSegments = 5;
+        const h = 0.6;
+        let rBottom = 0.28;
         
-        for (let s = 0; s < skirtsCount; s++) {
-            const coneGeo = new THREE.ConeGeometry(baseRadii[s], baseHeights[s], 5);
-            const cone = new THREE.Mesh(coneGeo, foliageMat);
+        for (let i = 0; i < trunkSegments; i++) {
+            const rTop = rBottom * 0.9;
+            const segGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 5);
+            const seg = new THREE.Mesh(segGeo, trunkMat);
+            seg.castShadow = true;
+            seg.receiveShadow = true;
             
-            // Random translation, rotation, and tilt to break symmetry
-            cone.position.set(
-                (Math.random() - 0.5) * 0.04,
-                baseHeightsY[s],
-                (Math.random() - 0.5) * 0.04
-            );
-            cone.rotation.set(
-                (Math.random() - 0.5) * 0.06,
-                Math.random() * Math.PI * 2,
-                (Math.random() - 0.5) * 0.06
-            );
-            cone.castShadow = true;
-            treeGroup.add(cone);
+            seg.position.set(curX, curY + h/2, curZ);
+            
+            // Apply organic twist/bend
+            const angleX = 0.18 * Math.sin(i * 1.0);
+            const angleZ = 0.12 * Math.cos(i * 1.0);
+            seg.rotation.set(angleX, 0, angleZ);
+            
+            treeGroup.add(seg);
+            
+            curX += Math.sin(angleX) * h * 0.9;
+            curZ += Math.sin(angleZ) * h * 0.9;
+            curY += h * 0.9;
+            rBottom = rTop;
+        }
+        
+        // 2. Branching split into 3 gnarled main branches (umbrella shape)
+        const branches = [
+            { angleY: 0, tiltX: 0.5, tiltZ: 0.2, length: 1.6, scale: 0.8 },
+            { angleY: Math.PI * 2/3, tiltX: -0.3, tiltZ: 0.4, length: 1.8, scale: 0.75 },
+            { angleY: Math.PI * 4/3, tiltX: 0.2, tiltZ: -0.5, length: 1.5, scale: 0.7 }
+        ];
+        
+        for (const br of branches) {
+            const branchGroup = new THREE.Group();
+            branchGroup.position.set(curX, curY, curZ);
+            branchGroup.rotation.y = br.angleY;
+            
+            let brY = 0;
+            let brX = 0;
+            let brZ = 0;
+            let brRad = rBottom * br.scale;
+            const brSegs = 4;
+            const brH = br.length / brSegs;
+            
+            for (let j = 0; j < brSegs; j++) {
+                const nextRad = brRad * 0.85;
+                const segGeo = new THREE.CylinderGeometry(nextRad, brRad, brH, 4);
+                const seg = new THREE.Mesh(segGeo, trunkMat);
+                seg.castShadow = true;
+                seg.receiveShadow = true;
+                
+                // Keep branching outwards
+                const tiltX = br.tiltX * (1.0 + j * 0.1);
+                const tiltZ = br.tiltZ * (1.0 + j * 0.15);
+                seg.rotation.set(tiltX, 0, tiltZ);
+                seg.position.set(brX, brY + brH/2, brZ);
+                
+                branchGroup.add(seg);
+                
+                brX += Math.sin(tiltX) * brH * 0.95;
+                brZ += Math.sin(tiltZ) * brH * 0.95;
+                brY += brH * Math.cos(tiltX) * 0.95;
+                brRad = nextRad;
+            }
+            
+            // 3. Foliage Umbrella Domes at the end of each main branch!
+            const foliageDome = new THREE.Group();
+            foliageDome.position.set(brX, brY, brZ);
+            
+            const cloudParts = 5 + Math.floor(Math.random() * 3);
+            for (let p = 0; p < cloudParts; p++) {
+                const rad = 0.9 + Math.random() * 0.6;
+                const geo = new THREE.DodecahedronGeometry(rad, 1);
+                const mesh = new THREE.Mesh(geo, foliageMat);
+                mesh.castShadow = true;
+                
+                // Spread horizontally to create a nice wide umbrella profile
+                const px = (Math.random() - 0.5) * 1.5;
+                const pz = (Math.random() - 0.5) * 1.5;
+                const py = (rad * 0.25) + (Math.random() - 0.5) * 0.15;
+                
+                mesh.position.set(px, py, pz);
+                mesh.scale.set(1.4, 0.6 + Math.random() * 0.2, 1.2); // squash flat to look like a canopy umbrella tier
+                foliageDome.add(mesh);
+            }
+            branchGroup.add(foliageDome);
+            treeGroup.add(branchGroup);
         }
         
         return treeGroup;
