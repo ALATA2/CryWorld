@@ -462,14 +462,18 @@ export class VoxelTerrain {
                 const dz = (z - cz) / cz;
                 const distFromCenter = Math.sqrt(dx * dx + dz * dz);
                 
-                // Falloff weight: 1.0 at center, drops to 0.0 around distance 0.85
-                const islandWeight = Math.max(0.0, 1.0 - distFromCenter / 0.85);
-                const smoothWeight = Math.pow(islandWeight, 1.3);
+                // Falloff weight above water: 1.0 at center, drops to 0.0 around distance 0.85
+                const islandWeightAbove = Math.max(0.0, 1.0 - distFromCenter / 0.85);
+                const smoothWeightAbove = Math.pow(islandWeightAbove, 1.3);
 
-                // Base terrain height using Perlin Noise fBm
+                // Falloff weight below water (wider base): drops to 0.0 around distance 0.98
+                const islandWeightBelow = Math.max(0.0, 1.0 - distFromCenter / 0.98);
+                const smoothWeightBelow = Math.pow(islandWeightBelow, 1.3);
+
+                // Base terrain height factor using Perlin Noise fBm
                 const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
                 const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
-                const baseHeight = (4.0 + n1 + n2) * smoothWeight;
+                const baseHeightRaw = 4.0 + n1 + n2;
 
                 // Volcano Cone (placed at center-left: 38% width, 45% depth)
                 const vdx = x - (this.width * 0.38);
@@ -498,21 +502,24 @@ export class VoxelTerrain {
                     plainHeight = 4.5 * Math.pow(t, 2.0); // Gentle, flat elevation
                 }
 
-                const finalHeight = baseHeight + (volcanoHeight + plainHeight) * smoothWeight;
-
                 for (let y = 0; y < this.height; y++) {
                     const idx = x + y * this.width + z * this.width * this.height;
 
                     let density = 0;
                     if (y >= 40) {
+                        const finalHeight = baseHeightRaw * smoothWeightAbove + (volcanoHeight + plainHeight) * smoothWeightAbove;
                         density = finalHeight - (y - 32);
                     } else {
+                        const blend = y / 40.0;
+                        const mask = blend * smoothWeightAbove + (1.0 - blend) * smoothWeightBelow;
+                        const finalHeight = baseHeightRaw * mask + (volcanoHeight + plainHeight) * mask;
                         density = finalHeight - (y * 0.2);
                     }
 
                     // Add 3D bumpy noise for caves, ledges, and organic details
                     const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
-                    if (noiseY > 1 && noiseY < finalHeight + 2) {
+                    const finalHeightAbove = baseHeightRaw * smoothWeightAbove + (volcanoHeight + plainHeight) * smoothWeightAbove;
+                    if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
                         // Make noise amplitude smaller in the plain zone to keep it flat and clean
                         const noiseScale = pDist < 42.0 ? 0.35 : 1.8;
                         const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * noiseScale;
