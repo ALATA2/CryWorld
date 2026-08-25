@@ -1059,7 +1059,6 @@ function animate() {
         }
 
         // 3b. Calculate Head Bobbing & Running FOV effects
-        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
         let bobY = 0;
         
         if (isGrounded && isMoving && !inWater) {
