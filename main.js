@@ -461,29 +461,45 @@ function init() {
     const cloudMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         flatShading: true,
-        roughness: 0.9,
+        roughness: 0.95,
         metalness: 0.0
     });
     
     for (let c = 0; c < 15; c++) {
         const cloud = new THREE.Group();
-        const partsCount = 3 + Math.floor(Math.random() * 3);
+        const partsCount = 7 + Math.floor(Math.random() * 5); // 7 to 11 parts for rich detail
+        
         for (let p = 0; p < partsCount; p++) {
-            const rad = 6.0 + Math.random() * 8.0;
-            const part = new THREE.Mesh(new THREE.DodecahedronGeometry(rad, 0), cloudMat);
-            part.position.set(
-                (p - partsCount/2) * rad * 0.75,
-                (Math.random() - 0.5) * rad * 0.2,
-                (Math.random() - 0.5) * rad * 0.2
+            const t = p / (partsCount - 1);
+            const offsetFactor = t - 0.5; // range -0.5 to 0.5
+            
+            // Taper sizes from the center outward
+            const baseRad = 7.0 + Math.random() * 5.0;
+            const rad = baseRad * (1.0 - Math.abs(offsetFactor) * 1.2);
+            if (rad < 2.5) continue; // Skip too small parts
+            
+            // Detail 1 gives a beautifully faceted low-poly sphere
+            const part = new THREE.Mesh(new THREE.DodecahedronGeometry(rad, 1), cloudMat);
+            
+            // Align bottoms of the spheres near the same plane (creating flat bottoms)
+            const posX = offsetFactor * 42.0; // Elongate the cloud cluster
+            const posY = rad * 0.35; // Lift slightly so bottom is flatter
+            const posZ = (Math.random() - 0.5) * rad * 0.8;
+            
+            part.position.set(posX, posY, posZ);
+            part.scale.set(1.5, 0.45 + Math.random() * 0.15, 1.1); // Squash flat on Y
+            part.rotation.set(
+                (Math.random() - 0.5) * 0.1,
+                Math.random() * Math.PI,
+                (Math.random() - 0.5) * 0.1
             );
-            part.scale.set(1.4, 0.5 + Math.random() * 0.3, 1.0); // Squash flat
             cloud.add(part);
         }
         
-        const range = 1000;
+        const range = 1200;
         cloud.position.set(
             (Math.random() - 0.5) * range,
-            110 + Math.random() * 70,
+            120 + Math.random() * 70,
             (Math.random() - 0.5) * range
         );
         cloud.userData = { speed: 0.3 + Math.random() * 1.2 };
@@ -1126,13 +1142,19 @@ function spawnEnvironmentObjects(scene, terrain) {
             segment.position.x += Math.sin(bendX) * 0.2;
             segment.position.z += Math.sin(bendZ) * 0.2;
             
+            // Add a bulbous joint ring at the bottom of the segment for textured palm bark
+            const ringGeo = new THREE.CylinderGeometry(rBottom * 1.12, rBottom * 1.12, 0.12, 5);
+            const ring = new THREE.Mesh(ringGeo, trunkMat);
+            ring.position.y = -h / 2;
+            segment.add(ring);
+            
             trunkGroup.add(segment);
             currentHeight += h * 0.88;
         }
         treeGroup.add(trunkGroup);
         
-        // Leaves at the crown (drooping arching palm fronds)
-        const leavesCount = 8 + Math.floor(Math.random() * 3);
+        // Leaves at the crown (drooping arching feathered palm fronds)
+        const leavesCount = 9 + Math.floor(Math.random() * 3); // 9 to 11 fronds
         const leafMat = new THREE.MeshStandardMaterial({
             color: 0x2ecc71, // Bright tropical green
             flatShading: true,
@@ -1154,30 +1176,55 @@ function spawnEnvironmentObjects(scene, terrain) {
             
             let curY = 0;
             let curZ = 0;
-            let rotX = 0.15; // Initial upward/outward tilt
-            const leafSegments = 5; // Construct leaf from chained segments to curve it
+            let rotX = 0.12; // Initial upward/outward tilt
+            const stemSegments = 5; // Construct leaf from chained segments to curve it
+            const stemL = 0.8;
             
-            for (let j = 0; j < leafSegments; j++) {
-                // Taper size towards the tip
-                const w = 0.52 * (1.0 - j / leafSegments);
-                const l = 0.85;
-                const h = 0.02;
-                
-                const bladeGeo = new THREE.BoxGeometry(w, h, l);
-                const blade = new THREE.Mesh(bladeGeo, leafMat);
-                blade.castShadow = true;
+            for (let j = 0; j < stemSegments; j++) {
+                // Taper stem size towards the tip
+                const stemW = 0.04 * (1.0 - j / stemSegments);
+                const stemH = 0.03 * (1.0 - j / stemSegments);
+                const stemPartGeo = new THREE.BoxGeometry(stemW, stemH, stemL);
+                const stemPart = new THREE.Mesh(stemPartGeo, leafMat);
+                stemPart.castShadow = true;
                 
                 // Position relative to current segment joint
-                blade.position.set(0, curY, curZ + l / 2);
-                blade.rotation.x = -rotX;
-                leaf.add(blade);
+                stemPart.position.set(0, curY, curZ + stemL / 2);
+                stemPart.rotation.x = -rotX;
+                leaf.add(stemPart);
+                
+                // Add leaflets along this stem segment (feathered comb pattern)
+                const leafletsPerSeg = 3;
+                for (let f = 0; f < leafletsPerSeg; f++) {
+                    const segmentProgress = (j * leafletsPerSeg + f) / (stemSegments * leafletsPerSeg); // 0 to 1 along the whole leaf
+                    const leafletLength = 1.1 * Math.sin(segmentProgress * Math.PI); // Longest in middle, tapered
+                    if (leafletLength < 0.15) continue;
+                    
+                    const leafletW = 0.08 * (1.0 - segmentProgress * 0.4); // Taper width towards tip
+                    const leafletGeo = new THREE.BoxGeometry(leafletW, 0.006, leafletLength);
+                    const zOffset = (f / leafletsPerSeg) * stemL;
+                    
+                    // Left leaflet
+                    const leafletL = new THREE.Mesh(leafletGeo, leafMat);
+                    leafletL.castShadow = true;
+                    leafletL.position.set(-leafletLength / 2 * 0.85, curY, curZ + zOffset);
+                    leafletL.rotation.set(-rotX + 0.1, 0.45, -0.22);
+                    leaf.add(leafletL);
+                    
+                    // Right leaflet
+                    const leafletR = new THREE.Mesh(leafletGeo, leafMat);
+                    leafletR.castShadow = true;
+                    leafletR.position.set(leafletLength / 2 * 0.85, curY, curZ + zOffset);
+                    leafletR.rotation.set(-rotX + 0.1, -0.45, 0.22);
+                    leaf.add(leafletR);
+                }
                 
                 // Move joint pointer forward along the curve
-                curZ += l * Math.cos(rotX) * 0.95;
-                curY -= l * Math.sin(rotX) * 0.95;
+                curZ += stemL * Math.cos(rotX) * 0.95;
+                curY -= stemL * Math.sin(rotX) * 0.95;
                 
                 // Increase downward rotation for next segment (droop/arch)
-                rotX += 0.22;
+                rotX += 0.18;
             }
             
             leavesGroup.add(leaf);
@@ -1214,39 +1261,48 @@ function spawnEnvironmentObjects(scene, terrain) {
         const treeGroup = new THREE.Group();
         
         // Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.12, 0.28, 2.5, 4);
+        const trunkGeo = new THREE.CylinderGeometry(0.08, 0.28, 5.0, 4);
         const trunkMat = new THREE.MeshStandardMaterial({
             color: 0x8d7a6b, // Light grey-brown wood
             flatShading: true,
             roughness: 0.95
         });
         const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 1.25;
+        trunk.position.y = 2.5;
         trunk.castShadow = true;
         trunk.receiveShadow = true;
         treeGroup.add(trunk);
         
-        // Foliage cones (3 stacked cones)
+        // Foliage cones (5 stacked conifer skirts with broken symmetry)
         const foliageMat = new THREE.MeshStandardMaterial({
             color: 0x27ae60, // Bright conifer pine green
             flatShading: true,
             roughness: 0.85
         });
         
-        const cone1 = new THREE.Mesh(new THREE.ConeGeometry(1.4, 1.8, 4), foliageMat);
-        cone1.position.y = 2.2;
-        cone1.castShadow = true;
-        treeGroup.add(cone1);
+        const skirtsCount = 5;
+        const baseRadii = [1.6, 1.35, 1.1, 0.8, 0.5];
+        const baseHeights = [1.9, 1.6, 1.3, 1.0, 0.75];
+        const baseHeightsY = [2.0, 3.1, 4.0, 4.8, 5.4];
         
-        const cone2 = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.4, 4), foliageMat);
-        cone2.position.y = 3.2;
-        cone2.castShadow = true;
-        treeGroup.add(cone2);
-        
-        const cone3 = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.0, 4), foliageMat);
-        cone3.position.y = 4.1;
-        cone3.castShadow = true;
-        treeGroup.add(cone3);
+        for (let s = 0; s < skirtsCount; s++) {
+            const coneGeo = new THREE.ConeGeometry(baseRadii[s], baseHeights[s], 5);
+            const cone = new THREE.Mesh(coneGeo, foliageMat);
+            
+            // Random translation, rotation, and tilt to break symmetry
+            cone.position.set(
+                (Math.random() - 0.5) * 0.04,
+                baseHeightsY[s],
+                (Math.random() - 0.5) * 0.04
+            );
+            cone.rotation.set(
+                (Math.random() - 0.5) * 0.06,
+                Math.random() * Math.PI * 2,
+                (Math.random() - 0.5) * 0.06
+            );
+            cone.castShadow = true;
+            treeGroup.add(cone);
+        }
         
         return treeGroup;
     }
@@ -1325,8 +1381,50 @@ function spawnEnvironmentObjects(scene, terrain) {
     pineTrunkGeos.forEach(g => g.dispose());
     pineFoliageGeos.forEach(g => g.dispose());
 
-    // Master rock geometry (unit dodecahedron, scaled per instance matrix)
-    const masterRockGeo = new THREE.DodecahedronGeometry(1.0, 0);
+    // Create master rock geometry (merged cluster of dodecahedrons for realistic outcrops)
+    const rockClusterGeos = [];
+    
+    // 1. Central main boulder (squashed slightly on Y to sit naturally)
+    const mainRockGeo = new THREE.DodecahedronGeometry(1.0, 0);
+    mainRockGeo.scale(1.0, 0.72, 1.0);
+    rockClusterGeos.push(mainRockGeo);
+    
+    // 2. Add 3 satellite stones around the base at random offsets and sizes
+    const satelliteCount = 3;
+    for (let s = 0; s < satelliteCount; s++) {
+        const angle = (s * Math.PI * 2) / satelliteCount + (Math.random() - 0.5) * 0.4;
+        const dist = 0.75 + Math.random() * 0.25;
+        const rad = 0.35 + Math.random() * 0.25;
+        
+        const satGeo = new THREE.DodecahedronGeometry(rad, 0);
+        
+        // Randomly scale each axis to create unique jagged shapes
+        satGeo.scale(
+            0.8 + Math.random() * 0.4,
+            0.6 + Math.random() * 0.4,
+            0.8 + Math.random() * 0.4
+        );
+        
+        // Random rotation
+        satGeo.rotateX(Math.random() * Math.PI);
+        satGeo.rotateY(Math.random() * Math.PI);
+        satGeo.rotateZ(Math.random() * Math.PI);
+        
+        // Translate relative to base of main rock
+        const px = Math.cos(angle) * dist;
+        const py = -0.22 + (Math.random() - 0.5) * 0.12;
+        const pz = Math.sin(angle) * dist;
+        satGeo.translate(px, py, pz);
+        
+        rockClusterGeos.push(satGeo);
+    }
+    
+    const masterRockGeo = BufferGeometryUtils.mergeGeometries(rockClusterGeos, true);
+    
+    // Dispose the sub-geometries to free memory
+    rockClusterGeos.forEach(g => {
+        if (g !== masterRockGeo) g.dispose();
+    });
 
     // Materials
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
