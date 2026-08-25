@@ -961,6 +961,55 @@ function animate() {
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
 
+        // Player collision with palm and pine tree trunks (sliding cylinder response)
+        const playerRadius = 0.5;
+        const treeCollisionRadius = 0.35;
+        const minDist = playerRadius + treeCollisionRadius;
+        
+        // Check palms
+        for (let i = 0; i < palmInstances.length; i++) {
+            const inst = palmInstances[i];
+            const tx = inst.x + terrain.group.position.x;
+            const tz = inst.z + terrain.group.position.z;
+            
+            const dx = camera.position.x - tx;
+            const dz = camera.position.z - tz;
+            const distSq = dx * dx + dz * dz;
+            
+            if (distSq < minDist * minDist) {
+                const treeBottom = inst.y;
+                const treeHeight = 8.0;
+                if (camera.position.y - playerHeight < treeBottom + treeHeight && camera.position.y > treeBottom) {
+                    const dist = Math.sqrt(distSq);
+                    const pushFactor = (minDist - dist) / (dist || 1);
+                    camera.position.x += dx * pushFactor;
+                    camera.position.z += dz * pushFactor;
+                }
+            }
+        }
+        
+        // Check pines
+        for (let i = 0; i < pineInstances.length; i++) {
+            const inst = pineInstances[i];
+            const tx = inst.x + terrain.group.position.x;
+            const tz = inst.z + terrain.group.position.z;
+            
+            const dx = camera.position.x - tx;
+            const dz = camera.position.z - tz;
+            const distSq = dx * dx + dz * dz;
+            
+            if (distSq < minDist * minDist) {
+                const treeBottom = inst.y;
+                const treeHeight = 5.0;
+                if (camera.position.y - playerHeight < treeBottom + treeHeight && camera.position.y > treeBottom) {
+                    const dist = Math.sqrt(distSq);
+                    const pushFactor = (minDist - dist) / (dist || 1);
+                    camera.position.x += dx * pushFactor;
+                    camera.position.z += dz * pushFactor;
+                }
+            }
+        }
+
         // Apply vertical velocity (gravity & jump)
         camera.position.y += velocity.y * delta;
 
