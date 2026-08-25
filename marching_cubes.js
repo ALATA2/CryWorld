@@ -498,19 +498,24 @@ export class VoxelTerrain {
                     plainHeight = 4.5 * Math.pow(t, 2.0); // Gentle, flat elevation
                 }
 
-                const finalHeight = (36.0 + baseHeight * 1.5 + volcanoHeight * 1.5 + plainHeight * 2.0) * smoothWeight;
+                const finalHeight = baseHeight + (volcanoHeight + plainHeight) * smoothWeight;
 
                 for (let y = 0; y < this.height; y++) {
                     const idx = x + y * this.width + z * this.width * this.height;
 
-                    // Density = Height field - y coord
-                    let density = finalHeight - y;
+                    let density = 0;
+                    if (y >= 40) {
+                        density = finalHeight - (y - 32);
+                    } else {
+                        density = finalHeight - (y * 0.2);
+                    }
 
                     // Add 3D bumpy noise for caves, ledges, and organic details
-                    if (y > 1 && y < finalHeight + 2) {
+                    const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
+                    if (noiseY > 1 && noiseY < finalHeight + 2) {
                         // Make noise amplitude smaller in the plain zone to keep it flat and clean
                         const noiseScale = pDist < 42.0 ? 0.35 : 1.8;
-                        const bumpyNoise = this.noise.noise3d(x * 0.12, y * 0.12, z * 0.12) * noiseScale;
+                        const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * noiseScale;
                         density += bumpyNoise;
                     }
 
