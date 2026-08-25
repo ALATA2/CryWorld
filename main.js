@@ -67,6 +67,13 @@ let palmInstances = [];
 let pineInstances = [];
 let rockInstances = [];
 
+// Head bobbing & FOV speed effects variables
+let bobTime = 0;
+let lastBobY = 0;
+let currentFov = 65;
+const defaultFov = 65;
+const runFov = 73;
+
 // Initialize the game
 init();
 animate();
@@ -872,6 +879,12 @@ function animate() {
     const time = performance.now();
     const delta = Math.min(clock.getDelta(), 0.1); // Clamp delta to avoid massive leaps on frame drops
 
+    // 0. Remove previous frame's head bob offset before physics calculations
+    if (lastBobY !== 0) {
+        camera.position.y -= lastBobY;
+        lastBobY = 0;
+    }
+
     // Update falling tree and rock physics
     updateFoliagePhysics(delta);
 
@@ -1045,6 +1058,36 @@ function animate() {
             isGrounded = true;
         }
 
+        // 3b. Calculate Head Bobbing & Running FOV effects
+        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
+        let bobY = 0;
+        
+        if (isGrounded && isMoving && !inWater) {
+            const speedFactor = keyStates.ShiftLeft ? 1.45 : 1.0;
+            bobTime += delta * 12.0 * speedFactor; // Speed of head bobbing
+            
+            const bobAmplitude = keyStates.ShiftLeft ? 0.16 : 0.08; // Higher amplitude when running
+            bobY = Math.sin(bobTime) * bobAmplitude;
+            
+            // Apply rolling side-to-side sway
+            const bobRoll = Math.cos(bobTime * 0.5) * (keyStates.ShiftLeft ? 0.02 : 0.01);
+            camera.rotation.z = bobRoll;
+        } else {
+            // Decay Z-roll rotation back to neutral
+            camera.rotation.z *= 0.9;
+        }
+        
+        camera.position.y += bobY;
+        lastBobY = bobY;
+
+        // Smoothly interpolate FOV for running speed effect
+        const targetFov = (keyStates.ShiftLeft && isMoving && !inWater) ? runFov : defaultFov;
+        if (currentFov !== targetFov) {
+            currentFov = THREE.MathUtils.lerp(currentFov, targetFov, delta * 8.0);
+            camera.fov = currentFov;
+            camera.updateProjectionMatrix();
+        }
+
         // 4. Update HUD Coordinates (meters scaled)
         posInfo.textContent = `X: ${Math.round(camera.position.x)} Y: ${Math.round(camera.position.y - 8.0)} Z: ${Math.round(camera.position.z)}`;
     }
@@ -1118,6 +1161,28 @@ function animate() {
         } else {
             // No tool visible for this slot, reset animation flag immediately
             isDiggingAnim = false;
+        }
+    } else {
+        // Rest state tool breathing and walking sway
+        const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : null);
+        if (tool) {
+            const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
+            const inWater = camera.position.y < 8.0;
+            if (isGrounded && isMoving && !inWater) {
+                // Walking/running sway matching the head bobbing frequency
+                const speedFactor = keyStates.ShiftLeft ? 1.45 : 1.0;
+                const bobSwayX = Math.cos(bobTime) * (keyStates.ShiftLeft ? 0.055 : 0.028);
+                const bobSwayY = Math.sin(bobTime * 2.0) * (keyStates.ShiftLeft ? 0.035 : 0.018);
+                
+                tool.position.set(0.35 + bobSwayX, -0.35 + bobSwayY, -0.6);
+            } else {
+                // Breathing sway (gentle idle breathing)
+                const breatheTime = performance.now() * 0.0018;
+                const breatheY = Math.sin(breatheTime) * 0.008;
+                tool.position.set(0.35, -0.35 + breatheY, -0.6);
+            }
+            // Ensure rotation is reset back to default resting rotation
+            tool.rotation.set(-0.25, -0.25, 0);
         }
     }
 
