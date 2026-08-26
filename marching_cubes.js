@@ -437,6 +437,9 @@ export class VoxelTerrain {
         // Map of currently loaded VoxelChunk objects: key is "cx,cy,cz"
         this.loadedChunks = new Map();
 
+        // Queue for progressive chunk building
+        this.chunkBuildQueue = [];
+
         this.noise = new PerlinNoise();
     }
 
@@ -553,6 +556,7 @@ export class VoxelTerrain {
         const chunkRadius = Math.ceil(renderDistance / (this.chunkSize * this.voxelScale));
         
         const activeKeys = new Set();
+        let queueChanged = false;
         
         // Loop through chunks in a cylinder around player
         for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
@@ -572,12 +576,8 @@ export class VoxelTerrain {
                         const chunk = new VoxelChunk(cx, cy, cz, this);
                         this.loadedChunks.set(key, chunk);
                         this.group.add(chunk.mesh);
-                        chunk.rebuild();
-                    } else {
-                        const chunk = this.loadedChunks.get(key);
-                        if (chunk.dirty) {
-                            chunk.rebuild();
-                        }
+                        this.chunkBuildQueue.push(chunk);
+                        queueChanged = true;
                     }
                 }
             }
@@ -589,6 +589,32 @@ export class VoxelTerrain {
                 this.group.remove(chunk.mesh);
                 chunk.geometry.dispose();
                 this.loadedChunks.delete(key);
+                
+                const idx = this.chunkBuildQueue.indexOf(chunk);
+                if (idx !== -1) {
+                    this.chunkBuildQueue.splice(idx, 1);
+                    queueChanged = true;
+                }
+            }
+        }
+
+        // Sort build queue: build closest chunks first (only if queue changed)
+        if (queueChanged) {
+            this.chunkBuildQueue.sort((a, b) => {
+                const da = Math.pow(a.cx - pcx, 2) + Math.pow(a.cz - pcz, 2);
+                const db = Math.pow(b.cx - pcx, 2) + Math.pow(b.cz - pcz, 2);
+                return da - db;
+            });
+        }
+
+        // Rebuild a max of 8 chunks per frame to avoid blocking the main thread
+        const buildsPerFrame = 8;
+        let builtCount = 0;
+        while (this.chunkBuildQueue.length > 0 && builtCount < buildsPerFrame) {
+            const chunk = this.chunkBuildQueue.shift();
+            if (chunk.dirty) {
+                chunk.rebuild();
+                builtCount++;
             }
         }
     }

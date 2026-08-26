@@ -297,7 +297,7 @@ function init() {
     const testPos = new THREE.Vector3(startX, 130, startZ);
 
     // Build initial chunks around start position so we can query height
-    terrain.updateChunksAroundPlayer(testPos, 600);
+    terrain.updateChunksAroundPlayer(testPos, 150);
 
     // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
     heightmapData = new Uint8Array(256 * 256);
