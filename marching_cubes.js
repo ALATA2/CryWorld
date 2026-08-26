@@ -219,15 +219,56 @@ class VoxelChunk {
         this.mesh.receiveShadow = true;
         this.mesh.matrixAutoUpdate = false; // Optimize: Chunk is static relative to terrain group
         
+        const size = terrain.chunkSize + 1;
+        this.densities = new Float32Array(size * size * size);
+        this.initialized = false;
         this.dirty = true;
+    }
+
+    initializeDensities() {
+        if (this.initialized) return;
+        this.initialized = true;
+
+        const terrain = this.terrain;
+        const chunkSize = terrain.chunkSize;
+        const size = chunkSize + 1;
+
+        for (let i = 0; i < size; i++) {
+            for (let j = 0; j < size; j++) {
+                for (let k = 0; k < size; k++) {
+                    const vx = this.cx * chunkSize + i;
+                    const vy = this.cy * chunkSize + j;
+                    const vz = this.cz * chunkSize + k;
+                    
+                    const idx = i + j * size + k * size * size;
+                    this.densities[idx] = terrain.getDensity(vx, vy, vz);
+                }
+            }
+        }
+    }
+
+    setLocalDensity(vx, vy, vz, value) {
+        const size = this.terrain.chunkSize + 1;
+        const i = vx - this.cx * this.terrain.chunkSize;
+        const j = vy - this.cy * this.terrain.chunkSize;
+        const k = vz - this.cz * this.terrain.chunkSize;
+        
+        if (i >= 0 && i < size && j >= 0 && j < size && k >= 0 && k < size) {
+            const idx = i + j * size + k * size * size;
+            this.densities[idx] = value;
+            this.dirty = true;
+        }
     }
 
     rebuild() {
         if (!this.dirty) return;
+        
+        this.initializeDensities();
         this.dirty = false;
 
         const terrain = this.terrain;
         const chunkSize = terrain.chunkSize;
+        const size = chunkSize + 1;
         const voxelScale = terrain.voxelScale;
         const isolevel = 0.0;
 
@@ -243,15 +284,15 @@ class VoxelChunk {
                     const vy = this.cy * chunkSize + j;
                     const vz = this.cz * chunkSize + k;
 
-                    // Corner densities
-                    const d0 = terrain.getDensity(vx,     vy,     vz);
-                    const d1 = terrain.getDensity(vx + 1, vy,     vz);
-                    const d2 = terrain.getDensity(vx + 1, vy + 1, vz);
-                    const d3 = terrain.getDensity(vx,     vy + 1, vz);
-                    const d4 = terrain.getDensity(vx,     vy,     vz + 1);
-                    const d5 = terrain.getDensity(vx + 1, vy,     vz + 1);
-                    const d6 = terrain.getDensity(vx + 1, vy + 1, vz + 1);
-                    const d7 = terrain.getDensity(vx,     vy + 1, vz + 1);
+                    // Corner densities read from local cache
+                    const d0 = this.densities[i +     j * size +     k * size * size];
+                    const d1 = this.densities[(i + 1) + j * size +     k * size * size];
+                    const d2 = this.densities[(i + 1) + (j + 1) * size + k * size * size];
+                    const d3 = this.densities[i +     (j + 1) * size + k * size * size];
+                    const d4 = this.densities[i +     j * size +     (k + 1) * size * size];
+                    const d5 = this.densities[(i + 1) + j * size +     (k + 1) * size * size];
+                    const d6 = this.densities[(i + 1) + (j + 1) * size + (k + 1) * size * size];
+                    const d7 = this.densities[i +     (j + 1) * size + (k + 1) * size * size];
 
                     // Build configuration index
                     let cubeindex = 0;
@@ -656,8 +697,8 @@ export class VoxelTerrain {
         const testPos = worldPosition.clone();
         testPos.y = startHeight;
         
-        // Step downwards until we hit a solid voxel
-        const step = 0.5;
+        // Step downwards in larger voxel-sized steps (voxelScale = 3.0)
+        const step = 3.0;
         while (testPos.y > 0) {
             if (this.isPositionSolid(testPos)) {
                 // Find exact boundary Y using a mini binary search
