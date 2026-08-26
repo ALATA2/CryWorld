@@ -620,6 +620,24 @@ export class VoxelTerrain {
                 builtCount++;
             }
         }
+
+        // Diagnostics for debugging missing chunk column (0,0)
+        if (!this.debugTimer) this.debugTimer = 0;
+        this.debugTimer++;
+        if (this.debugTimer % 90 === 0) {
+            console.log("--- CHUNK DEBUG (0,0) ---");
+            for (let cy = 0; cy < this.chunksY; cy++) {
+                const key = `0,${cy},0`;
+                const chunk = this.loadedChunks.get(key);
+                if (chunk) {
+                    const posCount = chunk.geometry.attributes.position ? chunk.geometry.attributes.position.count : 0;
+                    console.log(`Chunk ${key}: dirty=${chunk.dirty}, initialized=${chunk.initialized}, visible=${chunk.mesh.visible}, vertices=${posCount}, parent=${chunk.mesh.parent ? "yes" : "no"}`);
+                } else {
+                    console.log(`Chunk ${key}: NOT LOADED`);
+                }
+            }
+            console.log("Queue size:", this.chunkBuildQueue.length);
+        }
     }
 
     update() {
