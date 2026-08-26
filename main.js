@@ -12,7 +12,7 @@ let scene, camera, renderer, clock;
 let terrain, water, sky, sun, heightmapTexture, heightmapData;
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
-let activeSlot = 1;
+let activeSlot = 3;
 let clouds = [];
 let gameStarted = false;
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
@@ -407,7 +407,7 @@ function init() {
     rightArm = createArm(false);
     rightArm.position.set(0.35, -0.32, -0.55);
     rightArm.rotation.set(-0.1, -0.25, 0.0);
-    rightArm.visible = false; // Initially hidden because slot 1 is active (holding spear)
+    rightArm.visible = true; // Initially visible because slot 3 is active at start (hands empty)
     camera.add(rightArm);
 
     // 7b. First-Person Spear (View Model) Setup
@@ -448,6 +448,7 @@ function init() {
     // Position relative to camera (bottom-right)
     spear.position.set(0.35, -0.35, -0.6);
     spear.rotation.set(-0.25, -0.25, 0); // Leaning in
+    spear.visible = false; // Hide initially since slot 3 is active at start
     camera.add(spear);
 
     // 7bb. First-Person Pickaxe (View Model) Setup
