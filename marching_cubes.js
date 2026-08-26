@@ -493,16 +493,23 @@ export class VoxelTerrain {
         // Center of the world is (0, 0) in voxel space
         const distFromCenter = Math.sqrt(x * x + z * z);
         
-        // Circular atoll ring at radius 38 voxels (114 meters) with a thickness/span of 14 voxels (42 meters)
+        // 1. Circular atoll ring at radius 38 voxels (114 meters) with a thickness/span of 22 voxels (66 meters)
         const distFromAtoll = Math.abs(distFromCenter - 38.0);
-        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromAtoll / 14.0);
+        const atollWeightRaw = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
         
         // Keep a minimum land weight of 0.35 inside the lagoon (dist < 38)
-        // to make the lagoon shallow (approx. 24m deep) instead of dropping to the abyss
-        let landWeight = spawnIslandWeight;
+        let atollWeight = atollWeightRaw;
         if (distFromCenter < 38.0) {
-            landWeight = Math.max(0.35, spawnIslandWeight);
+            atollWeight = Math.max(0.35, atollWeightRaw);
         }
+        
+        // 2. Volcano island centered at (0, 95) with a radius of 25 voxels (75 meters)
+        // This is positioned near the atoll ring but is a separate island.
+        const distToVolcano = Math.sqrt(x * x + (z - 95.0) * (z - 95.0));
+        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 25.0);
+        
+        // Combine land weights of atoll and volcano
+        const landWeight = Math.max(atollWeight, volcanoWeight);
         
         // Smooth falloffs
         const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
@@ -513,11 +520,26 @@ export class VoxelTerrain {
         const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
         const baseHeightRaw = 4.0 + n1 + n2;
         
-        // Maldives sand dune/hill height on the atoll ring
+        // Calculate hill heights
         let hillHeight = 0;
-        if (distFromAtoll < 14.0) {
-            const t = 1.0 - distFromAtoll / 14.0;
-            hillHeight = 11.0 * Math.pow(t, 1.3);
+        
+        // Atoll hill height
+        if (distFromAtoll < 22.0) {
+            const t = 1.0 - distFromAtoll / 22.0;
+            hillHeight = Math.max(hillHeight, 11.0 * Math.pow(t, 1.3));
+        }
+        
+        // Volcano hill height with a central crater bowl
+        if (distToVolcano < 25.0) {
+            const t = 1.0 - distToVolcano / 25.0;
+            let vHill = 16.0 * Math.pow(t, 1.1); // Main cone height
+            
+            // Subtract a bowl for the crater at the very center of the volcano island (distance < 6 voxels)
+            if (distToVolcano < 6.0) {
+                const craterT = 1.0 - distToVolcano / 6.0;
+                vHill -= 6.0 * Math.pow(craterT, 1.5); // Crater depression
+            }
+            hillHeight = Math.max(hillHeight, vHill);
         }
         
         let density = 0;

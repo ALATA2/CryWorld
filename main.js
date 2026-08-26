@@ -291,9 +291,8 @@ function init() {
     // 6. Marching Cubes Voxel Terrain Setup
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
 
-    // Position player safely on the beach of the larger island
     const startX = 0;
-    const startZ = 45;
+    const startZ = 303; // Rim of the volcano island at Z = 95 voxels (285m) + 18m offset
     const testPos = new THREE.Vector3(startX, 130, startZ);
 
     // Build initial chunks around start position so we can query height
