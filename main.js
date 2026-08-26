@@ -261,17 +261,18 @@ function init() {
         'gl_FragColor = vec4( outgoingLight, alpha );',
         `// Map world position XZ to heightmap UV (footprint 768x768 centered at 0,0)
          vec2 heightmapUV = (worldPosition.xz + 384.0) / 768.0;
+         float depthVal = 120.0; // Default to deep ocean outside heightmap bounds
          float foamIntensity = 0.0;
          if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
              float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 192.0;
-             float waterDepth = 120.0 - groundHeight;
+             depthVal = max(0.0, 120.0 - groundHeight);
              
              // If shallow, generate waves breaking against the shore/object
-             if (waterDepth > 0.0 && waterDepth < 2.2) {
-                 float depthFactor = 1.0 - (waterDepth / 2.2);
+             if (depthVal > 0.0 && depthVal < 2.2) {
+                 float depthFactor = 1.0 - (depthVal / 2.2);
                  
                  // Breathing wave wave cycle (period: ~4.5 seconds)
-                 float waveCycle = sin(time * 1.4 - waterDepth * 7.5) * 0.5 + 0.5;
+                 float waveCycle = sin(time * 1.4 - depthVal * 7.5) * 0.5 + 0.5;
                  
                  // Foam is strong at the wave front and in very shallow water
                  foamIntensity = smoothstep(0.35, 0.85, depthFactor * waveCycle) * 0.85;
@@ -283,8 +284,11 @@ function init() {
              }
          }
          
+         // depth-based transparency: mix between 0.18 (very clear shore) and 0.96 (dark deep ocean)
+         float depthAlpha = mix(0.18, 0.96, 1.0 - exp(-0.065 * depthVal));
+         
          vec3 finalColor = mix(outgoingLight, vec3(0.92, 0.96, 1.0), foamIntensity);
-         float finalAlpha = mix(alpha, 0.95, foamIntensity);
+         float finalAlpha = mix(depthAlpha, 0.95, foamIntensity);
          gl_FragColor = vec4(finalColor, finalAlpha);`
     );
     
