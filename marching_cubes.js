@@ -503,10 +503,20 @@ export class VoxelTerrain {
             atollWeight = Math.max(0.35, atollWeightRaw);
         }
         
-        // 2. Volcano island centered at (0, 95) with a radius of 40 voxels (120 meters)
-        // This is positioned near the atoll ring but is a separate, wider island.
-        const distToVolcano = Math.sqrt(x * x + (z - 95.0) * (z - 95.0));
-        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 40.0);
+        // 2. Volcano island centered at (0, 95) with a radius of 42 voxels (126 meters)
+        // Stretched towards the south (dz < 0) to make a long flat tongue of land that enters the water smoothly
+        const dx = x;
+        let dz = z - 95.0;
+        if (dz < 0.0) {
+            dz = dz * 0.5; // Stretch by 2x along Z
+        }
+        
+        const distToVolcanoRaw = Math.sqrt(dx * dx + dz * dz);
+        // Add 2D Perlin noise to make the shoreline irregular
+        const shoreNoise = this.noise.noise2d(x * 0.08, z * 0.08) * 5.0;
+        const distToVolcano = distToVolcanoRaw + shoreNoise;
+        
+        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
         
         // Combine land weights of atoll and volcano
         const landWeight = Math.max(atollWeight, volcanoWeight);
@@ -529,15 +539,15 @@ export class VoxelTerrain {
             hillHeight = Math.max(hillHeight, 11.0 * Math.pow(t, 1.3));
         }
         
-        // Volcano hill height with a central crater bowl
-        if (distToVolcano < 40.0) {
-            const t = 1.0 - distToVolcano / 40.0;
-            let vHill = 18.0 * Math.pow(t, 1.4); // Softer, wider cone slope
+        // Volcano hill height with a central crater bowl (lower and flatter)
+        if (distToVolcano < 42.0) {
+            const t = 1.0 - distToVolcano / 42.0;
+            let vHill = 9.0 * Math.pow(t, 1.3); // Lower height (9 voxels max, around 27m above base height)
             
-            // Subtract a bowl for the crater at the very center of the volcano island (distance < 9 voxels)
-            if (distToVolcano < 9.0) {
-                const craterT = 1.0 - distToVolcano / 9.0;
-                vHill -= 7.0 * Math.pow(craterT, 1.5); // Crater depression
+            // Subtract a bowl for the crater at the very center of the volcano island (distance < 10 voxels)
+            if (distToVolcano < 10.0) {
+                const craterT = 1.0 - distToVolcano / 10.0;
+                vHill -= 4.5 * Math.pow(craterT, 1.5); // Crater depression
             }
             hillHeight = Math.max(hillHeight, vHill);
         }
