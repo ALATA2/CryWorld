@@ -2076,15 +2076,14 @@ function updateHeightmap() {
     const depth = 256;
     const scale = 3.0; // voxelScale
     
-    // Scan density values directly from top to bottom (very fast, no 3D raycasting/binary search)
-    const densities = terrain.densities;
-    
     for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
+            // Map x [0, 255] to vx [-128, 127] centered at world (0,0)
+            const vx = x - 128;
+            const vz = z - 128;
             let surfaceY = 0;
             for (let y = height - 1; y >= 0; y--) {
-                const idx = x + y * width + z * width * height;
-                if (densities[idx] >= 0.0) { // solid voxel threshold
+                if (terrain.getDensity(vx, y, vz) >= 0.0) { // solid voxel threshold
                     surfaceY = y;
                     break;
                 }
