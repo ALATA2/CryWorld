@@ -439,11 +439,7 @@ function init() {
     tip.position.z = -1.2;
     spear.add(tip);
 
-    // Right arm holding the spear
-    const spearArm = createArm(false);
-    spearArm.position.set(0.02, -0.05, -0.3);
-    spearArm.rotation.set(-0.2, 0.1, -0.3);
-    spear.add(spearArm);
+
     
     // Position relative to camera (bottom-right)
     spear.position.set(0.35, -0.35, -0.6);
@@ -474,11 +470,7 @@ function init() {
     pickHead.position.z = -1.0;
     pickaxe.add(pickHead);
 
-    // Right arm holding the pickaxe
-    const pickArm = createArm(false);
-    pickArm.position.set(0.02, -0.05, -0.25);
-    pickArm.rotation.set(-0.2, 0.1, -0.3);
-    pickaxe.add(pickArm);
+
     
     // Position and hide initially (since slot 1 is active spear)
     pickaxe.position.set(0.35, -0.35, -0.6);
@@ -548,11 +540,7 @@ function init() {
     exhaustCap.position.z = 0.09;
     manipulator.add(exhaustCap);
 
-    // Right arm holding the manipulator
-    const manipArm = createArm(false);
-    manipArm.position.set(0.0, -0.06, 0.05);
-    manipArm.rotation.set(-0.1, 0.0, -0.15);
-    manipulator.add(manipArm);
+
 
     // Position relative to camera (bottom-right)
     manipulator.position.set(0.35, -0.32, -0.65);
@@ -630,21 +618,25 @@ function init() {
             if (spear) spear.visible = true;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = false;
+            if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
         } else if (slotNum === 7) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = true;
             if (manipulator) manipulator.visible = false;
+            if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
         } else if (slotNum === 9) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = true;
+            if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
         } else {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = false;
+            if (leftArm) leftArm.visible = true;
             if (rightArm) rightArm.visible = true;
         }
     }
