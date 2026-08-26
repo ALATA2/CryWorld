@@ -1323,7 +1323,7 @@ function animate() {
     // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects, or high up to trigger space orbit effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
     const isLookingFromBelow = (camera.position.y < 120.0);
-    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 60.0, 0.0), 1.0);
+    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 70.0, 0.0), 1.0);
     
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
@@ -1335,37 +1335,38 @@ function animate() {
     const skyTopColor = new THREE.Color(0x0078d7);
     const skyBottomColor = new THREE.Color(0x8ce3ff);
     const spaceColor = new THREE.Color(0x020205); // near black space
-
+ 
     // Interpolate sky colors based on altitude
     const currentSkyTop = skyTopColor.clone().lerp(spaceColor, altFactor);
     const currentSkyBottom = skyBottomColor.clone().lerp(spaceColor, altFactor);
-
+ 
     if (sky && sky.material && sky.material.uniforms) {
         sky.material.uniforms['topColor'].value.copy(currentSkyTop);
         sky.material.uniforms['bottomColor'].value.copy(currentSkyBottom);
     }
-
+ 
     const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
-
+ 
     if (isLookingFromBelow) {
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
-            const baseOpacity = 0.32 * depthFactor;
+            const baseOpacity = 0.25 * depthFactor;
             const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.03 * depthFactor;
-            underwaterOverlay.style.background = `rgba(0, 200, 240, ${Math.max(0.0, wavePulse)})`;
+            underwaterOverlay.style.background = `rgba(0, 120, 180, ${Math.max(0.0, wavePulse)})`;
         }
-
-        // Interpolate fog color from current air fog to tropical water fog
-        const waterFog = new THREE.Color(0x00aacc);
-        const interpolatedFogColor = currentFogColor.clone().lerp(waterFog, depthFactor);
+ 
+        // Interpolate fog color from clear shallow water cyan to dark deep ocean abyss
+        const shallowWaterFog = new THREE.Color(0x007799);
+        const deepWaterFog = new THREE.Color(0x000511);
+        const interpolatedFogColor = shallowWaterFog.clone().lerp(deepWaterFog, depthFactor);
         scene.fog.color.copy(interpolatedFogColor);
-
-        // Linear fog range for water: gets tighter with depth
-        scene.fog.near = 0.1;
-        scene.fog.far = 600.0 - (600.0 - 25.0) * depthFactor;
-
-        // Interpolate exposure from bright noon (1.15) to dimmer underwater (0.75)
-        renderer.toneMappingExposure = 1.15 - (1.15 - 0.75) * depthFactor;
+ 
+        // Linear fog range for water: keeps realistic visibility (120m near surface, 50m in depth)
+        scene.fog.near = 5.0;
+        scene.fog.far = 120.0 - 70.0 * depthFactor;
+ 
+        // Interpolate exposure from bright noon (1.15) to very dark underwater (0.25)
+        renderer.toneMappingExposure = 1.15 - (1.15 - 0.25) * depthFactor;
 
         if (water && water.material && water.material.uniforms['alpha']) {
             water.material.uniforms['alpha'].value = 0.38;
