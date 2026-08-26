@@ -1346,7 +1346,6 @@ function animate() {
             water.material.uniforms['alpha'].value = 0.65;
         }
     }
-    }
 
     // 5c. Active Tool swing/punch animation tick (First Person stabbing/swinging/punching effect)
     if (isDiggingAnim) {
