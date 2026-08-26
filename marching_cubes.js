@@ -646,6 +646,57 @@ export class VoxelTerrain {
             }
             console.groupEnd();
         }
+
+        // Automatic missing terrain and queue diagnostics
+        if (!this.checkTimer) this.checkTimer = 0;
+        this.checkTimer++;
+        if (this.checkTimer % 180 === 0) {
+            let dirtyCount = 0;
+            let missingTerrainCount = 0;
+            const size = this.chunkSize;
+            
+            for (const key of activeKeys) {
+                const chunk = this.loadedChunks.get(key);
+                if (chunk) {
+                    if (chunk.dirty) {
+                        dirtyCount++;
+                    } else {
+                        const posCount = chunk.geometry.attributes.position ? chunk.geometry.attributes.position.count : 0;
+                        if (posCount === 0) {
+                            // Check if the chunk should procedurally contain solid terrain
+                            let shouldHaveTerrain = false;
+                            for (let i = 0; i <= size; i += 4) {
+                                for (let j = 0; j <= size; j += 4) {
+                                    for (let k = 0; k <= size; k += 4) {
+                                        const vx = chunk.cx * size + i;
+                                        const vy = chunk.cy * size + j;
+                                        const vz = chunk.cz * size + k;
+                                        if (this.getBaseDensity(vx, vy, vz) > 0.1) {
+                                            shouldHaveTerrain = true;
+                                            break;
+                                        }
+                                    }
+                                    if (shouldHaveTerrain) break;
+                                }
+                                if (shouldHaveTerrain) break;
+                            }
+                            if (shouldHaveTerrain) {
+                                missingTerrainCount++;
+                                if (missingTerrainCount <= 5) {
+                                    console.warn(`[Missing Terrain] Chunk (${chunk.cx}, ${chunk.cy}, ${chunk.cz}) has 0 vertices but should be solid!`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (dirtyCount > 0) {
+                console.log(`[Queue Status] Active dirty chunks: ${dirtyCount} | Queue size: ${this.chunkBuildQueue.length}`);
+            }
+            if (missingTerrainCount > 5) {
+                console.warn(`[Missing Terrain] ... and ${missingTerrainCount - 5} more chunks have 0 vertices but should be solid!`);
+            }
+        }
     }
 
     update() {
