@@ -86,8 +86,8 @@ animate();
 function init() {
     // 1. Scene & Camera Setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x44a2e6); // Deep tropical sky blue background
-    scene.fog = new THREE.FogExp2(0x44a2e6, 0.0007); // Clear, very thin tropical sky fog
+    scene.background = new THREE.Color(0x8ce3ff); // Caribbean cyan horizon background
+    scene.fog = new THREE.Fog(0x8ce3ff, 250, 600); // Linear fog to mask chunk rendering boundary
 
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 3000);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
@@ -289,17 +289,20 @@ function init() {
     scene.add(water);
 
     // 6. Marching Cubes Voxel Terrain Setup
-    // Footprint: Width = 256, Height = 64, Depth = 256, VoxelScale = 3.0 (total island footprint: 768m x 192m x 768m)
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
-
-    // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
-    heightmapData = new Uint8Array(256 * 256);
-    updateHeightmap();
 
     // Position player safely on the beach of the larger island
     const startX = 0;
     const startZ = 45;
     const testPos = new THREE.Vector3(startX, 130, startZ);
+
+    // Build initial chunks around start position so we can query height
+    terrain.updateChunksAroundPlayer(testPos, 600);
+
+    // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
+    heightmapData = new Uint8Array(256 * 256);
+    updateHeightmap();
+
     const groundY = terrain.getSurfaceHeight(testPos, 192.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
 
@@ -1093,11 +1096,13 @@ function animate() {
         // Strong vertical damping in water to simulate drag and stabilize floating
         velocity.y -= velocity.y * (inWater ? 4.0 : 1.0) * delta;
 
-        // Apply gravity (neutralized/reduced underwater to feel buoyant)
+        // Apply gravity (neutralized/reduced underwater to feel buoyant, and in orbit to feel weightless)
         if (inWater) {
             velocity.y -= gravity * 0.05 * delta; // 95% gravity reduction
         } else {
-            velocity.y -= gravity * delta;
+            const altitude = camera.position.y;
+            const gravityMultiplier = altitude > 180.0 ? Math.max(0.0, 1.0 - (altitude - 180.0) / 620.0) : 1.0;
+            velocity.y -= gravity * gravityMultiplier * delta;
         }
 
         // Jump execution or swim upwards
@@ -1276,34 +1281,53 @@ function animate() {
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
     water.material.uniforms['time'].value += delta * 0.12;
 
-    // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects
+    // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects, or high up to trigger space orbit effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
-    if (camera.position.y < 120.0) {
-        const depth = 120.0 - camera.position.y;
-        // Maximum effect reached at 60m depth
-        const depthFactor = Math.min(depth / 60.0, 1.0);
+    const isLookingFromBelow = (camera.position.y < 120.0);
+    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 60.0, 0.0), 1.0);
+    
+    // Altitude-based aerial perspective (flying into orbit)
+    const altitude = camera.position.y;
+    let altFactor = 0.0;
+    if (altitude > 180.0) {
+        altFactor = Math.min((altitude - 180.0) / 620.0, 1.0); // complete transition to orbit at Y = 800m
+    }
+    
+    const skyTopColor = new THREE.Color(0x0078d7);
+    const skyBottomColor = new THREE.Color(0x8ce3ff);
+    const spaceColor = new THREE.Color(0x020205); // near black space
 
+    // Interpolate sky colors based on altitude
+    const currentSkyTop = skyTopColor.clone().lerp(spaceColor, altFactor);
+    const currentSkyBottom = skyBottomColor.clone().lerp(spaceColor, altFactor);
+
+    if (sky && sky.material && sky.material.uniforms) {
+        sky.material.uniforms['topColor'].value.copy(currentSkyTop);
+        sky.material.uniforms['bottomColor'].value.copy(currentSkyBottom);
+    }
+
+    const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
+
+    if (isLookingFromBelow) {
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
-            // Opacity scales with depth, plus a gentle caustics pulse
             const baseOpacity = 0.32 * depthFactor;
             const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.03 * depthFactor;
             underwaterOverlay.style.background = `rgba(0, 200, 240, ${Math.max(0.0, wavePulse)})`;
         }
 
-        // Interpolate fog color from sky blue (0x8ce3ff) to tropical turquoise (0x00aacc)
-        const skyFog = new THREE.Color(0x8ce3ff);
+        // Interpolate fog color from current air fog to tropical water fog
         const waterFog = new THREE.Color(0x00aacc);
-        skyFog.lerp(waterFog, depthFactor);
-        scene.fog.color.copy(skyFog);
+        const interpolatedFogColor = currentFogColor.clone().lerp(waterFog, depthFactor);
+        scene.fog.color.copy(interpolatedFogColor);
 
-        // Interpolate fog density from clear air (0.0007) to dense water (0.045)
-        scene.fog.density = 0.0007 + (0.045 - 0.0007) * depthFactor;
+        // Linear fog range for water: gets tighter with depth
+        scene.fog.near = 0.1;
+        scene.fog.far = 600.0 - (600.0 - 25.0) * depthFactor;
 
         // Interpolate exposure from bright noon (1.15) to dimmer underwater (0.75)
         renderer.toneMappingExposure = 1.15 - (1.15 - 0.75) * depthFactor;
 
-        // Make water surface highly transparent from below to see the sky clearly and hide reflection artifacts
         if (water && water.material && water.material.uniforms['alpha']) {
             water.material.uniforms['alpha'].value = 0.38;
         }
@@ -1311,15 +1335,17 @@ function animate() {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
         }
-        // Restore deep clear tropical sky-blue fog and exposure settings
-        scene.fog.color.setHex(0x8ce3ff); // Matches the sky horizon bottomColor
-        scene.fog.density = 0.0007; // Very thin, clear horizon fade
+        
+        scene.fog.color.copy(currentFogColor);
+        scene.fog.near = 250.0 + (1000.0 - 250.0) * altFactor; // Fog recedes as we climb higher
+        scene.fog.far = 600.0 + (3000.0 - 600.0) * altFactor;  // Far distance expands up to 3km
+        
         renderer.toneMappingExposure = 1.15;
 
-        // Restore standard tropical transparency when looking from above
         if (water && water.material && water.material.uniforms['alpha']) {
             water.material.uniforms['alpha'].value = 0.65;
         }
+    }
     }
 
     // 5c. Active Tool swing/punch animation tick (First Person stabbing/swinging/punching effect)
@@ -1438,7 +1464,10 @@ function animate() {
         }
     }
 
-    // 5e. Center the sky dome on the player so it renders infinitely around them
+    // 5e. Update active terrain chunks and center sky dome on the player
+    if (terrain) {
+        terrain.updateChunksAroundPlayer(camera.position, 600);
+    }
     if (sky) {
         sky.position.copy(camera.position);
     }
@@ -1901,14 +1930,11 @@ function spawnEnvironmentObjects(scene, terrain) {
     let treesPlaced = 0;
     while (treesPlaced < palmTreesCount && attempts < 1500) {
         attempts++;
-        const vx = 4 + Math.random() * (terrain.width - 8);
-        const vz = 4 + Math.random() * (terrain.depth - 8);
-        
-        const wx = vx * terrain.voxelScale;
-        const wz = vz * terrain.voxelScale;
+        const wx = (Math.random() - 0.5) * 700.0;
+        const wz = (Math.random() - 0.5) * 700.0;
         
         // Sample height from global height map
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 192.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
         
         // Spawn range: between 120.5m (beaches) and 125.0m, keeping spacing
         if (groundHeight > 120.5 && groundHeight < 125.0 && isFarEnough(wx, wz, 5.0)) {
@@ -1946,13 +1972,10 @@ function spawnEnvironmentObjects(scene, terrain) {
     let pinesPlaced = 0;
     while (pinesPlaced < pineTreesCount && attempts < 1000) {
         attempts++;
-        const vx = 4 + Math.random() * (terrain.width - 8);
-        const vz = 4 + Math.random() * (terrain.depth - 8);
+        const wx = (Math.random() - 0.5) * 700.0;
+        const wz = (Math.random() - 0.5) * 700.0;
         
-        const wx = vx * terrain.voxelScale;
-        const wz = vz * terrain.voxelScale;
-        
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 192.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
         
         // Spawn pine trees on mountain slopes (125.0m up to 185.0m)
         if (groundHeight >= 125.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.5)) {
@@ -1983,19 +2006,16 @@ function spawnEnvironmentObjects(scene, terrain) {
             pinesPlaced++;
         }
     }
-
+ 
     // Spawning loop for Rocks
     attempts = 0;
     let rocksPlaced = 0;
     while (rocksPlaced < rocksCount && attempts < 1200) {
         attempts++;
-        const vx = 3 + Math.random() * (terrain.width - 6);
-        const vz = 3 + Math.random() * (terrain.depth - 6);
+        const wx = (Math.random() - 0.5) * 700.0;
+        const wz = (Math.random() - 0.5) * 700.0;
         
-        const wx = vx * terrain.voxelScale;
-        const wz = vz * terrain.voxelScale;
-        
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx + terrain.group.position.x, 0, wz + terrain.group.position.z), 192.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
         
         if (groundHeight > 110.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.0)) {
             const y = groundHeight - 0.25;

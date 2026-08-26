@@ -362,12 +362,11 @@ class VoxelChunk {
         }
     }
 }
-
 // ==========================================
 // VOXEL TERRAIN MANAGEMENT CLASS
 // ==========================================
 export class VoxelTerrain {
-    constructor(scene, width = 64, height = 32, depth = 64, voxelScale = 2.0) {
+    constructor(scene, width = 256, height = 64, depth = 256, voxelScale = 3.0) {
         this.scene = scene;
         this.width = width;
         this.height = height;
@@ -375,9 +374,7 @@ export class VoxelTerrain {
         this.voxelScale = voxelScale;
         this.chunkSize = 16;
         
-        this.chunksX = Math.ceil(width / this.chunkSize);
         this.chunksY = Math.ceil(height / this.chunkSize);
-        this.chunksZ = Math.ceil(depth / this.chunkSize);
 
         // Core terrain material with Vertex Colors and flat low-poly shading
         this.material = new THREE.MeshStandardMaterial({
@@ -388,190 +385,199 @@ export class VoxelTerrain {
             side: THREE.FrontSide
         });
 
-        // Global density array
-        this.densities = new Float32Array(width * height * depth);
+        // Sparse map for modified voxels: key is "x,y,z"
+        this.modifiedVoxels = new Map();
         
-        // Group to hold all chunk meshes, shifted so that the island center is at (0, 0)
+        // Group to hold all chunk meshes
         this.group = new THREE.Group();
-        this.group.position.set(
-            -(this.width * this.voxelScale) / 2,
-            0,
-            -(this.depth * this.voxelScale) / 2
-        );
+        this.group.position.set(0, 0, 0);
         this.scene.add(this.group);
 
-        // Initialize chunks
-        this.chunks = [];
-        for (let cx = 0; cx < this.chunksX; cx++) {
-            this.chunks[cx] = [];
-            for (let cy = 0; cy < this.chunksY; cy++) {
-                this.chunks[cx][cy] = [];
-                for (let cz = 0; cz < this.chunksZ; cz++) {
-                    const chunk = new VoxelChunk(cx, cy, cz, this);
-                    this.chunks[cx][cy][cz] = chunk;
-                    this.group.add(chunk.mesh);
-                }
-            }
-        }
+        // Map of currently loaded VoxelChunk objects: key is "cx,cy,cz"
+        this.loadedChunks = new Map();
 
         this.noise = new PerlinNoise();
-        this.generateIsland();
-        this.rebuildAll();
     }
 
     getDensity(x, y, z) {
-        // Out of bounds voxels are empty air (negative density)
-        if (x < 0 || x >= this.width || y < 0 || y >= this.height || z < 0 || z >= this.depth) {
+        // Out of bounds voxels are empty air
+        if (y < 0 || y >= this.height) {
             return -1.0;
         }
-        return this.densities[x + y * this.width + z * this.width * this.height];
+        if (x < -3666 || x > 3666 || z < -3666 || z > 3666) {
+            return -1.0;
+        }
+        
+        const key = `${x},${y},${z}`;
+        if (this.modifiedVoxels.has(key)) {
+            return this.modifiedVoxels.get(key);
+        }
+        return this.getBaseDensity(x, y, z);
     }
 
     setDensity(x, y, z, value) {
-        if (x < 0 || x >= this.width || y < 0 || y >= this.height || z < 0 || z >= this.depth) return;
+        if (y < 0 || y >= this.height) return;
+        if (x < -3666 || x > 3666 || z < -3666 || z > 3666) return;
         
-        const index = x + y * this.width + z * this.width * this.height;
-        this.densities[index] = value;
+        const key = `${x},${y},${z}`;
+        this.modifiedVoxels.set(key, value);
 
         // Mark chunks reading this voxel as dirty
-        const cx1 = Math.max(0, Math.floor((x - 1) / this.chunkSize));
-        const cx2 = Math.min(this.chunksX - 1, Math.floor(x / this.chunkSize));
-        const cy1 = Math.max(0, Math.floor((y - 1) / this.chunkSize));
-        const cy2 = Math.min(this.chunksY - 1, Math.floor(y / this.chunkSize));
-        const cz1 = Math.max(0, Math.floor((z - 1) / this.chunkSize));
-        const cz2 = Math.min(this.chunksZ - 1, Math.floor(z / this.chunkSize));
+        const cx1 = Math.floor((x - 1) / this.chunkSize);
+        const cx2 = Math.floor(x / this.chunkSize);
+        const cy1 = Math.floor((y - 1) / this.chunkSize);
+        const cy2 = Math.floor(y / this.chunkSize);
+        const cz1 = Math.floor((z - 1) / this.chunkSize);
+        const cz2 = Math.floor(z / this.chunkSize);
 
         for (let cx = cx1; cx <= cx2; cx++) {
             for (let cy = cy1; cy <= cy2; cy++) {
                 for (let cz = cz1; cz <= cz2; cz++) {
-                    this.chunks[cx][cy][cz].dirty = true;
+                    const chunkKey = `${cx},${cy},${cz}`;
+                    if (this.loadedChunks.has(chunkKey)) {
+                        this.loadedChunks.get(chunkKey).dirty = true;
+                    }
                 }
             }
         }
     }
 
-    generateIsland() {
-        const cx = this.width / 2;
-        const cz = this.depth / 2;
+    getBaseDensity(x, y, z) {
+        // Center of the world is (0, 0) in voxel space
+        const distFromCenter = Math.sqrt(x * x + z * z);
+        
+        // Main spawn island at center (radius of 90 voxels = 270 meters)
+        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromCenter / 90.0);
+        
+        // Procedural islands noise (archipelago)
+        const landNoise = this.noise.noise2d(x * 0.003, z * 0.003);
+        // Islands form where noise is above -0.1
+        const islandNoiseWeight = Math.max(0.0, (landNoise + 0.1) * 1.5);
+        
+        // Combine spawn island weight and procedural island noise
+        const landWeight = Math.max(spawnIslandWeight, islandNoiseWeight);
+        
+        // Smooth falloffs
+        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.3);
+        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.6), 1.3);
+        
+        // Base terrain height factor using Perlin Noise fBm
+        const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
+        const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
+        const baseHeightRaw = 4.0 + n1 + n2;
+        
+        // Gentle Maldives sand dune/hill on the main island
+        let hillHeight = 0;
+        if (distFromCenter < 25.0) {
+            const t = 1.0 - distFromCenter / 25.0;
+            hillHeight = 3.5 * Math.pow(t, 1.4);
+        }
+        
+        let density = 0;
+        if (y >= 40) {
+            const finalHeight = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+            density = finalHeight - (y - 32);
+        } else {
+            const blend = y / 40.0;
+            const mask = blend * smoothWeightAbove + (1.0 - blend) * smoothWeightBelow;
+            const finalHeight = baseHeightRaw * mask + hillHeight * mask;
+            density = finalHeight - (y * 0.2);
+        }
+        
+        // Add 3D bumpy noise for organic detail
+        const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
+        const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+        if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
+            const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
+            density += bumpyNoise;
+        }
+        
+        // Keep ocean floor flat and solid at y === 0
+        if (y === 0) {
+            density = 1.0;
+        }
+        
+        return density;
+    }
 
-        for (let x = 0; x < this.width; x++) {
-            for (let z = 0; z < this.depth; z++) {
-                // Circular distance from island center (relative to 64.0 to preserve absolute scale on 256x256 grid)
-                const dx = (x - cx) / 64.0;
-                const dz = (z - cz) / 64.0;
-                const distFromCenter = Math.sqrt(dx * dx + dz * dz);
+    updateChunksAroundPlayer(playerPos, renderDistance = 600) {
+        const pvx = Math.floor(playerPos.x / this.voxelScale);
+        const pvy = Math.floor(playerPos.y / this.voxelScale);
+        const pvz = Math.floor(playerPos.z / this.voxelScale);
+        
+        const pcx = Math.floor(pvx / this.chunkSize);
+        const pcy = Math.floor(pvy / this.chunkSize);
+        const pcz = Math.floor(pvz / this.chunkSize);
+        
+        const chunkRadius = Math.ceil(renderDistance / (this.chunkSize * this.voxelScale));
+        
+        const activeKeys = new Set();
+        
+        // Loop through chunks in a cylinder around player
+        for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
+            for (let cz = pcz - chunkRadius; cz <= pcz + chunkRadius; cz++) {
+                // Keep within 22km limits (cx from -229 to 229)
+                if (cx < -229 || cx > 229 || cz < -229 || cz > 229) continue;
                 
-                // Falloff weight above water: 1.0 at center, drops to 0.0 around distance 0.85 (54.4 voxels)
-                const islandWeightAbove = Math.max(0.0, 1.0 - distFromCenter / 0.85);
-                const smoothWeightAbove = Math.pow(islandWeightAbove, 1.3);
-
-                // Falloff weight below water (wider base): drops to 0.0 around distance 1.85 (118.4 voxels)
-                const islandWeightBelow = Math.max(0.0, 1.0 - distFromCenter / 1.85);
-                const smoothWeightBelow = Math.pow(islandWeightBelow, 1.3);
-
-                // Base terrain height factor using Perlin Noise fBm
-                const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
-                const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
-                const baseHeightRaw = 4.0 + n1 + n2;
-
-                // Gentle Maldives sand dune/hill instead of a volcanic peak
-                const vdx = x - (cx - 15.0);
-                const vdz = z - (cz - 6.0);
-                const vDist = Math.sqrt(vdx * vdx + vdz * vdz);
-                let volcanoHeight = 0;
-                if (vDist < 25.0) {
-                    const t = 1.0 - vDist / 25.0;
-                    volcanoHeight = 3.5 * Math.pow(t, 1.4); // Very low, soft sandy hill
-                }
-
-                // Flat Plain Zone (placed at center-right)
-                const pdx = x - (cx + 23.0);
-                const pdz = z - (cz + 2.0);
-                const pDist = Math.sqrt(pdx * pdx + pdz * pdz);
-                let plainHeight = 0;
-                if (pDist < 35.0) {
-                    const t = 1.0 - pDist / 35.0;
-                    plainHeight = 2.0 * Math.pow(t, 2.0); // Very low plain
-                }
-
-                for (let y = 0; y < this.height; y++) {
-                    const idx = x + y * this.width + z * this.width * this.height;
-
-                    let density = 0;
-                    if (y >= 40) {
-                        const finalHeight = baseHeightRaw * smoothWeightAbove + (volcanoHeight + plainHeight) * smoothWeightAbove;
-                        density = finalHeight - (y - 32);
+                for (let cy = 0; cy < this.chunksY; cy++) {
+                    const dx = cx - pcx;
+                    const dz = cz - pcz;
+                    if (dx*dx + dz*dz > chunkRadius * chunkRadius) continue;
+                    
+                    const key = `${cx},${cy},${cz}`;
+                    activeKeys.add(key);
+                    
+                    if (!this.loadedChunks.has(key)) {
+                        const chunk = new VoxelChunk(cx, cy, cz, this);
+                        this.loadedChunks.set(key, chunk);
+                        this.group.add(chunk.mesh);
+                        chunk.rebuild();
                     } else {
-                        const blend = y / 40.0;
-                        const mask = blend * smoothWeightAbove + (1.0 - blend) * smoothWeightBelow;
-                        const finalHeight = baseHeightRaw * mask + (volcanoHeight + plainHeight) * mask;
-                        density = finalHeight - (y * 0.2);
+                        const chunk = this.loadedChunks.get(key);
+                        if (chunk.dirty) {
+                            chunk.rebuild();
+                        }
                     }
-
-                    // Add 3D bumpy noise for caves, ledges, and organic details
-                    const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
-                    const finalHeightAbove = baseHeightRaw * smoothWeightAbove + (volcanoHeight + plainHeight) * smoothWeightAbove;
-                    if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
-                        // Make noise amplitude smaller in the plain zone to keep it flat and clean
-                        const noiseScale = pDist < 42.0 ? 0.35 : 1.8;
-                        const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * noiseScale;
-                        density += bumpyNoise;
-                    }
-
-                    // Keep ocean floor flat and solid at the very bottom
-                    if (y === 0) {
-                        density = 1.0;
-                    }
-
-                    this.densities[idx] = density;
                 }
             }
         }
-    }
-
-    rebuildAll() {
-        for (let cx = 0; cx < this.chunksX; cx++) {
-            for (let cy = 0; cy < this.chunksY; cy++) {
-                for (let cz = 0; cz < this.chunksZ; cz++) {
-                    this.chunks[cx][cy][cz].dirty = true;
-                    this.chunks[cx][cy][cz].rebuild();
-                }
+        
+        // Unload chunks that are too far
+        for (const [key, chunk] of this.loadedChunks.entries()) {
+            if (!activeKeys.has(key)) {
+                this.group.remove(chunk.mesh);
+                chunk.geometry.dispose();
+                this.loadedChunks.delete(key);
             }
         }
     }
 
     update() {
-        // Rebuild any chunk marked dirty
-        for (let cx = 0; cx < this.chunksX; cx++) {
-            for (let cy = 0; cy < this.chunksY; cy++) {
-                for (let cz = 0; cz < this.chunksZ; cz++) {
-                    if (this.chunks[cx][cy][cz].dirty) {
-                        this.chunks[cx][cy][cz].rebuild();
-                    }
-                }
+        // Rebuild loaded dirty chunks
+        for (const chunk of this.loadedChunks.values()) {
+            if (chunk.dirty) {
+                chunk.rebuild();
             }
         }
     }
 
     // Dynamic interaction: Dig or Build terrain
     modifyTerrain(worldPosition, radius, mode) {
-        // Convert worldPosition back to voxel grid space
-        const localPos = worldPosition.clone().sub(this.group.position).divideScalar(this.voxelScale);
+        const localPos = worldPosition.clone().divideScalar(this.voxelScale);
         
         const vx = Math.round(localPos.x);
         const vy = Math.round(localPos.y);
         const vz = Math.round(localPos.z);
 
         const rVox = Math.ceil(radius / this.voxelScale);
-
         let modified = false;
 
-        const xMin = Math.max(0, vx - rVox);
-        const xMax = Math.min(this.width - 1, vx + rVox);
+        const xMin = Math.max(-3666, vx - rVox);
+        const xMax = Math.min(3666, vx + rVox);
         const yMin = Math.max(1, vy - rVox); // Prevent digging the ocean floor level (y=0)
         const yMax = Math.min(this.height - 1, vy + rVox);
-        const zMin = Math.max(0, vz - rVox);
-        const zMax = Math.min(this.depth - 1, vz + rVox);
+        const zMin = Math.max(-3666, vz - rVox);
+        const zMax = Math.min(3666, vz + rVox);
 
         for (let x = xMin; x <= xMax; x++) {
             for (let y = yMin; y <= yMax; y++) {
@@ -587,12 +593,9 @@ export class VoxelTerrain {
                         let newVal = val;
 
                         if (mode === 'dig') {
-                            // Digging: push density negative (air)
-                            // We make a smooth falloff towards the edges of the sphere
                             const brushFalloff = (dist / rVox) - 1.0;
                             newVal = Math.min(val, brushFalloff);
                         } else if (mode === 'build') {
-                            // Building: push density positive (solid)
                             const brushFalloff = 1.0 - (dist / rVox);
                             newVal = Math.max(val, brushFalloff);
                         }
@@ -610,14 +613,13 @@ export class VoxelTerrain {
 
     // Physics helper: sample density at any continuous position to determine if solid
     isPositionSolid(worldPosition) {
-        const localPos = worldPosition.clone().sub(this.group.position).divideScalar(this.voxelScale);
+        const localPos = worldPosition.clone().divideScalar(this.voxelScale);
         
         const fx = Math.floor(localPos.x);
         const fy = Math.floor(localPos.y);
         const fz = Math.floor(localPos.z);
 
-        if (fx < 0 || fx >= this.width - 1 || fy < 0 || fy >= this.height - 1 || fz < 0 || fz >= this.depth - 1) {
-            // Standard bounding logic: out of bounds below sea-level is solid bottom, above is air
+        if (fy < 0 || fy >= this.height - 1 || fx < -3666 || fx >= 3666 || fz < -3666 || fz >= 3666) {
             return worldPosition.y <= 0;
         }
 
