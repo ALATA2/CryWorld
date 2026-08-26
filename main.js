@@ -26,10 +26,12 @@ const keyStates = {
     KeyS: false,
     KeyD: false,
     Space: false,
-    ShiftLeft: false
+    ShiftLeft: false,
+    KeyQ: false
 };
 
 let isGrounded = false;
+let isFlying = false;
 const playerHeight = 1.8; // Camera height above ground
 const gravity = 25.0; // Gravity acceleration (m/s^2)
 const jumpForce = 10.0; // Jump power
@@ -757,6 +759,18 @@ function setupInputListeners() {
         if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
             keyStates.ShiftLeft = true;
         }
+        if (event.code === 'KeyF') {
+            if (controls.isLocked) {
+                isFlying = !isFlying;
+                if (isFlying) {
+                    velocity.y = 0;
+                }
+                const flyInfo = document.getElementById('fly-info');
+                if (flyInfo) {
+                    flyInfo.style.display = isFlying ? 'inline' : 'none';
+                }
+            }
+        }
     };
 
     const onKeyUp = function (event) {
@@ -1088,15 +1102,18 @@ function animate() {
         const inWater = camera.position.y < 120.0;
         
         // Walk controls dampening (less horizontal drag in water to glide)
-        const dragFactor = inWater ? 6.0 : 10.0;
+        const dragFactor = isFlying ? 5.0 : (inWater ? 6.0 : 10.0);
         velocity.x -= velocity.x * dragFactor * delta;
         velocity.z -= velocity.z * dragFactor * delta;
         
-        // Strong vertical damping in water to simulate drag and stabilize floating
-        velocity.y -= velocity.y * (inWater ? 4.0 : 1.0) * delta;
+        // Strong vertical damping in water to simulate drag and stabilize floating, and flying to stabilize hovering
+        const verticalDrag = isFlying ? 5.0 : (inWater ? 4.0 : 1.0);
+        velocity.y -= velocity.y * verticalDrag * delta;
 
         // Apply gravity (neutralized/reduced underwater to feel buoyant, and in orbit to feel weightless)
-        if (inWater) {
+        if (isFlying) {
+            // Gravity is disabled while flying
+        } else if (inWater) {
             velocity.y -= gravity * 0.05 * delta; // 95% gravity reduction
         } else {
             const altitude = camera.position.y;
@@ -1104,9 +1121,12 @@ function animate() {
             velocity.y -= gravity * gravityMultiplier * delta;
         }
 
-        // Jump execution or swim upwards
+        // Jump execution or swim/fly upwards
         if (keyStates.Space) {
-            if (inWater) {
+            if (isFlying) {
+                // Fly upwards
+                velocity.y += (keyStates.ShiftLeft ? 180.0 : 90.0) * delta;
+            } else if (inWater) {
                 // Swim upwards actively using Space
                 velocity.y += 18.0 * delta;
             } else if (isGrounded) {
@@ -1115,16 +1135,24 @@ function animate() {
             }
         }
 
+        // Fly downwards with Q
+        if (keyStates.KeyQ && isFlying) {
+            velocity.y -= (keyStates.ShiftLeft ? 180.0 : 90.0) * delta;
+        }
+
         direction.z = Number(keyStates.KeyW) - Number(keyStates.KeyS);
         direction.x = Number(keyStates.KeyA) - Number(keyStates.KeyD);
         direction.normalize(); // Ensure uniform movement speed
 
-        // Running speed if Shift is held down
-        let currentSpeed = keyStates.ShiftLeft ? runSpeed : moveSpeed;
-
-        // Apply underwater speed drag
-        if (inWater) {
-            currentSpeed *= 0.45;
+        // Speed calculation
+        let currentSpeed;
+        if (isFlying) {
+            currentSpeed = keyStates.ShiftLeft ? 220.0 : 100.0;
+        } else {
+            currentSpeed = keyStates.ShiftLeft ? runSpeed : moveSpeed;
+            if (inWater) {
+                currentSpeed *= 0.45;
+            }
         }
 
         const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
@@ -1132,8 +1160,16 @@ function animate() {
         if (keyStates.KeyW || keyStates.KeyS) velocity.z -= direction.z * currentSpeed * delta;
         if (keyStates.KeyA || keyStates.KeyD) velocity.x -= direction.x * currentSpeed * delta;
 
-        // Swimming pitch and buoyancy mechanics
-        if (inWater) {
+        // Swimming/Flying pitch and buoyancy mechanics
+        if (isFlying) {
+            if (isMoving) {
+                // Fly up/down based on camera look direction pitch and move direction (W/S)
+                const lookDir = new THREE.Vector3();
+                camera.getWorldDirection(lookDir);
+                // direction.z is positive for W, negative for S
+                velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
+            }
+        } else if (inWater) {
             if (isMoving) {
                 // Swim up/down based on camera look direction pitch and move direction (W/S)
                 const lookDir = new THREE.Vector3();
@@ -1247,7 +1283,7 @@ function animate() {
         // 3b. Calculate Head Bobbing & Running FOV effects
         let bobY = 0;
         
-        if (isGrounded && isMoving && !inWater) {
+        if (isGrounded && isMoving && !inWater && !isFlying) {
             const speedFactor = keyStates.ShiftLeft ? 1.45 : 1.0;
             bobTime += delta * 12.0 * speedFactor; // Speed of head bobbing
             
