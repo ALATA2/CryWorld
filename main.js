@@ -2082,12 +2082,21 @@ function updateHeightmap() {
             const vx = x - 128;
             const vz = z - 128;
             let surfaceY = 0;
-            for (let y = height - 1; y >= 0; y--) {
-                if (terrain.getDensity(vx, y, vz) >= 0.0) { // solid voxel threshold
-                    surfaceY = y;
-                    break;
+            
+            const colKey = `${vx},${vz}`;
+            if (terrain.modifiedColumns.has(colKey)) {
+                // Column has been modified, perform accurate vertical scan
+                for (let y = height - 1; y >= 0; y--) {
+                    if (terrain.getDensity(vx, y, vz) >= 0.0) { // solid voxel threshold
+                        surfaceY = y;
+                        break;
+                    }
                 }
+            } else {
+                // Instantly estimate surface height mathematically (no noise loops)
+                surfaceY = terrain.getEstimatedSurfaceHeight(vx, vz);
             }
+            
             // Convert local voxel Y coordinate to world height (meters)
             const h = surfaceY * scale;
             const norm = Math.max(0.0, Math.min(192.0, h)) / 192.0;

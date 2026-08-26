@@ -428,6 +428,7 @@ export class VoxelTerrain {
 
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
+        this.modifiedColumns = new Set();
         
         // Group to hold all chunk meshes
         this.group = new THREE.Group();
@@ -465,8 +466,9 @@ export class VoxelTerrain {
         
         const key = `${x},${y},${z}`;
         this.modifiedVoxels.set(key, value);
+        this.modifiedColumns.add(`${x},${z}`);
 
-        // Mark chunks reading this voxel as dirty
+        // Mark chunks reading this voxel as dirty and update their local cache
         const cx1 = Math.floor((x - 1) / this.chunkSize);
         const cx2 = Math.floor(x / this.chunkSize);
         const cy1 = Math.floor((y - 1) / this.chunkSize);
@@ -479,7 +481,8 @@ export class VoxelTerrain {
                 for (let cz = cz1; cz <= cz2; cz++) {
                     const chunkKey = `${cx},${cy},${cz}`;
                     if (this.loadedChunks.has(chunkKey)) {
-                        this.loadedChunks.get(chunkKey).dirty = true;
+                        const chunk = this.loadedChunks.get(chunkKey);
+                        chunk.setLocalDensity(x, y, z, value);
                     }
                 }
             }
@@ -744,6 +747,43 @@ export class VoxelTerrain {
             testPos.y -= step;
         }
         return 0; // Water level base Y
+    }
+
+    getEstimatedSurfaceHeight(vx, vz) {
+        const distFromCenter = Math.sqrt(vx * vx + vz * vz);
+        
+        // Main spawn island at center (radius of 90 voxels)
+        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromCenter / 90.0);
+        
+        // Procedural islands noise (archipelago)
+        const landNoise = this.noise.noise2d(vx * 0.003, vz * 0.003);
+        const islandNoiseWeight = Math.max(0.0, (landNoise + 0.1) * 1.5);
+        
+        const landWeight = Math.max(spawnIslandWeight, islandNoiseWeight);
+        
+        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.3);
+        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.6), 1.3);
+        
+        const n1 = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.5;
+        const n2 = this.noise.noise2d(vx * 0.10, vz * 0.10) * 1.0;
+        const baseHeightRaw = 4.0 + n1 + n2;
+        
+        let hillHeight = 0;
+        if (distFromCenter < 25.0) {
+            const t = 1.0 - distFromCenter / 25.0;
+            hillHeight = 3.5 * Math.pow(t, 1.4);
+        }
+        
+        let estimatedY = 0;
+        const yAbove = 32.0 + (baseHeightRaw + hillHeight) * smoothWeightAbove;
+        if (yAbove >= 40.0) {
+            estimatedY = yAbove;
+        } else {
+            estimatedY = 5.0 * (baseHeightRaw + hillHeight) * smoothWeightBelow;
+            if (estimatedY > 40.0) estimatedY = 40.0;
+        }
+        
+        return Math.max(0.0, Math.floor(estimatedY));
     }
 }
 
