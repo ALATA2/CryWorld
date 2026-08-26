@@ -601,8 +601,8 @@ export class VoxelTerrain {
             }
         }
 
-        // Sort build queue: build closest chunks first (only if queue changed)
-        if (queueChanged) {
+        // Sort build queue: build closest chunks first
+        if (this.chunkBuildQueue.length > 0) {
             this.chunkBuildQueue.sort((a, b) => {
                 const da = Math.pow(a.cx - pcx, 2) + Math.pow(a.cz - pcz, 2);
                 const db = Math.pow(b.cx - pcx, 2) + Math.pow(b.cz - pcz, 2);
@@ -610,8 +610,8 @@ export class VoxelTerrain {
             });
         }
 
-        // Rebuild a max of 8 chunks per frame to avoid blocking the main thread
-        const buildsPerFrame = 8;
+        // Rebuild a max of 16 chunks per frame to avoid blocking the main thread and catch up faster
+        const buildsPerFrame = 16;
         let builtCount = 0;
         while (this.chunkBuildQueue.length > 0 && builtCount < buildsPerFrame) {
             const chunk = this.chunkBuildQueue.shift();
