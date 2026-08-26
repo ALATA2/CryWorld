@@ -503,10 +503,10 @@ export class VoxelTerrain {
             atollWeight = Math.max(0.35, atollWeightRaw);
         }
         
-        // 2. Volcano island centered at (0, 95) with a radius of 25 voxels (75 meters)
-        // This is positioned near the atoll ring but is a separate island.
+        // 2. Volcano island centered at (0, 95) with a radius of 40 voxels (120 meters)
+        // This is positioned near the atoll ring but is a separate, wider island.
         const distToVolcano = Math.sqrt(x * x + (z - 95.0) * (z - 95.0));
-        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 25.0);
+        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 40.0);
         
         // Combine land weights of atoll and volcano
         const landWeight = Math.max(atollWeight, volcanoWeight);
@@ -530,14 +530,14 @@ export class VoxelTerrain {
         }
         
         // Volcano hill height with a central crater bowl
-        if (distToVolcano < 25.0) {
-            const t = 1.0 - distToVolcano / 25.0;
-            let vHill = 16.0 * Math.pow(t, 1.1); // Main cone height
+        if (distToVolcano < 40.0) {
+            const t = 1.0 - distToVolcano / 40.0;
+            let vHill = 18.0 * Math.pow(t, 1.4); // Softer, wider cone slope
             
-            // Subtract a bowl for the crater at the very center of the volcano island (distance < 6 voxels)
-            if (distToVolcano < 6.0) {
-                const craterT = 1.0 - distToVolcano / 6.0;
-                vHill -= 6.0 * Math.pow(craterT, 1.5); // Crater depression
+            // Subtract a bowl for the crater at the very center of the volcano island (distance < 9 voxels)
+            if (distToVolcano < 9.0) {
+                const craterT = 1.0 - distToVolcano / 9.0;
+                vHill -= 7.0 * Math.pow(craterT, 1.5); // Crater depression
             }
             hillHeight = Math.max(hillHeight, vHill);
         }
