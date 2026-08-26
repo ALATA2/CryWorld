@@ -11,7 +11,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun, heightmapTexture, heightmapData;
 let controls;
-let spear, pickaxe, manipulator, isDiggingAnim = false, animTime = 0;
+let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
 let activeSlot = 1;
 let clouds = [];
 let gameStarted = false;
@@ -398,6 +398,18 @@ function init() {
 
     scene.add(controls.getObject());
 
+    // 7ap. Player Arms Setup
+    leftArm = createArm(true);
+    leftArm.position.set(-0.35, -0.32, -0.55);
+    leftArm.rotation.set(-0.1, 0.25, 0.0);
+    camera.add(leftArm);
+
+    rightArm = createArm(false);
+    rightArm.position.set(0.35, -0.32, -0.55);
+    rightArm.rotation.set(-0.1, -0.25, 0.0);
+    rightArm.visible = false; // Initially hidden because slot 1 is active (holding spear)
+    camera.add(rightArm);
+
     // 7b. First-Person Spear (View Model) Setup
     spear = new THREE.Group();
     
@@ -426,6 +438,12 @@ function init() {
     tip.rotation.x = Math.PI / 2;
     tip.position.z = -1.2;
     spear.add(tip);
+
+    // Right arm holding the spear
+    const spearArm = createArm(false);
+    spearArm.position.set(0.02, -0.05, -0.3);
+    spearArm.rotation.set(-0.2, 0.1, -0.3);
+    spear.add(spearArm);
     
     // Position relative to camera (bottom-right)
     spear.position.set(0.35, -0.35, -0.6);
@@ -454,6 +472,12 @@ function init() {
     pickHead.rotation.z = Math.PI / 2; // Perpendicular to shaft
     pickHead.position.z = -1.0;
     pickaxe.add(pickHead);
+
+    // Right arm holding the pickaxe
+    const pickArm = createArm(false);
+    pickArm.position.set(0.02, -0.05, -0.25);
+    pickArm.rotation.set(-0.2, 0.1, -0.3);
+    pickaxe.add(pickArm);
     
     // Position and hide initially (since slot 1 is active spear)
     pickaxe.position.set(0.35, -0.35, -0.6);
@@ -522,6 +546,12 @@ function init() {
     exhaustCap.rotation.x = Math.PI / 2;
     exhaustCap.position.z = 0.09;
     manipulator.add(exhaustCap);
+
+    // Right arm holding the manipulator
+    const manipArm = createArm(false);
+    manipArm.position.set(0.0, -0.06, 0.05);
+    manipArm.rotation.set(-0.1, 0.0, -0.15);
+    manipulator.add(manipArm);
 
     // Position relative to camera (bottom-right)
     manipulator.position.set(0.35, -0.32, -0.65);
@@ -599,18 +629,22 @@ function init() {
             if (spear) spear.visible = true;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = false;
+            if (rightArm) rightArm.visible = false;
         } else if (slotNum === 7) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = true;
             if (manipulator) manipulator.visible = false;
+            if (rightArm) rightArm.visible = false;
         } else if (slotNum === 9) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = true;
+            if (rightArm) rightArm.visible = false;
         } else {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = false;
+            if (rightArm) rightArm.visible = true;
         }
     }
     
@@ -1221,7 +1255,7 @@ function animate() {
         }
     }
 
-    // 5c. Active Tool swing animation tick (First Person stabbing/swinging effect)
+    // 5c. Active Tool swing/punch animation tick (First Person stabbing/swinging/punching effect)
     if (isDiggingAnim) {
         const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : ((activeSlot === 9) ? manipulator : null));
         if (tool) {
@@ -1243,38 +1277,80 @@ function animate() {
                     tool.rotation.set(-0.25, -0.25, 0);
                 }
             }
+        } else if (rightArm && rightArm.visible) {
+            // Punch animation for empty right hand
+            animTime += delta * 18.0;
+            if (animTime < Math.PI) {
+                rightArm.position.z = -0.55 - Math.sin(animTime) * 0.22;
+                rightArm.position.y = -0.32 + Math.sin(animTime) * 0.08;
+                rightArm.rotation.x = -0.1 - Math.sin(animTime) * 0.3;
+                rightArm.rotation.y = -0.25 - Math.sin(animTime) * 0.2;
+            } else {
+                isDiggingAnim = false;
+                rightArm.position.set(0.35, -0.32, -0.55);
+                rightArm.rotation.set(-0.1, -0.25, 0);
+            }
         } else {
-            // No tool visible for this slot, reset animation flag immediately
             isDiggingAnim = false;
         }
     } else {
-        // Rest state tool breathing and walking sway
+        // Rest state sways for active tool and player arms
         const tool = (activeSlot === 1) ? spear : ((activeSlot === 7) ? pickaxe : ((activeSlot === 9) ? manipulator : null));
-        if (tool) {
-            const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
-            const inWater = camera.position.y < 120.0;
-            if (isGrounded && isMoving && !inWater) {
-                // Walking/running sway matching the head bobbing frequency
-                const speedFactor = keyStates.ShiftLeft ? 1.45 : 1.0;
-                const bobSwayX = Math.cos(bobTime) * (keyStates.ShiftLeft ? 0.055 : 0.028);
-                const bobSwayY = Math.sin(bobTime * 2.0) * (keyStates.ShiftLeft ? 0.035 : 0.018);
-                
+        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
+        const inWater = camera.position.y < 120.0;
+        
+        if (isGrounded && isMoving && !inWater) {
+            // Walking/running sway frequency
+            const bobSwayX = Math.cos(bobTime) * (keyStates.ShiftLeft ? 0.055 : 0.028);
+            const bobSwayY = Math.sin(bobTime * 2.0) * (keyStates.ShiftLeft ? 0.035 : 0.018);
+            
+            // Left arm sway
+            if (leftArm) {
+                leftArm.position.set(-0.35 + bobSwayX, -0.32 + bobSwayY, -0.55);
+            }
+            // Empty right arm sway (if active)
+            if (rightArm && rightArm.visible) {
+                rightArm.position.set(0.35 + bobSwayX, -0.32 + bobSwayY, -0.55);
+            }
+            // Tool sway
+            if (tool) {
                 if (tool === manipulator) {
                     tool.position.set(0.35 + bobSwayX, -0.32 + bobSwayY, -0.65);
                 } else {
                     tool.position.set(0.35 + bobSwayX, -0.35 + bobSwayY, -0.6);
                 }
-            } else {
-                // Breathing sway (gentle idle breathing)
-                const breatheTime = performance.now() * 0.0018;
-                const breatheY = Math.sin(breatheTime) * 0.008;
+            }
+        } else {
+            // Breathing sway (gentle idle breathing)
+            const breatheTime = performance.now() * 0.0018;
+            const breatheY = Math.sin(breatheTime) * 0.008;
+            
+            // Left arm breathe
+            if (leftArm) {
+                leftArm.position.set(-0.35, -0.32 + breatheY, -0.55);
+            }
+            // Empty right arm breathe (if active)
+            if (rightArm && rightArm.visible) {
+                rightArm.position.set(0.35, -0.32 + breatheY, -0.55);
+            }
+            // Tool breathe
+            if (tool) {
                 if (tool === manipulator) {
                     tool.position.set(0.35, -0.32 + breatheY, -0.65);
                 } else {
                     tool.position.set(0.35, -0.35 + breatheY, -0.6);
                 }
             }
-            // Ensure rotation is reset back to default resting rotation
+        }
+        
+        // Reset rotation back to default resting angles
+        if (leftArm) {
+            leftArm.rotation.set(-0.1, 0.25, 0.0);
+        }
+        if (rightArm && rightArm.visible) {
+            rightArm.rotation.set(-0.1, -0.25, 0.0);
+        }
+        if (tool) {
             if (tool === manipulator) {
                 tool.rotation.set(-0.15, -0.15, 0);
             } else {
@@ -2104,4 +2180,59 @@ function updateFoliagePhysics(delta) {
     if (palmUpdated || pineUpdated || rockUpdated) {
         renderer.shadowMap.needsUpdate = true;
     }
+}
+
+// ==========================================
+// FIRST-PERSON PLAYER ARM CREATION HELPERS
+// ==========================================
+function createArm(isLeft) {
+    const armGroup = new THREE.Group();
+
+    // Materials
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0ac69, flatShading: true, roughness: 0.8 }); // skin tone
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, flatShading: true, roughness: 0.9 }); // dark brown leather glove
+    const wristMat = new THREE.MeshStandardMaterial({ color: 0x3d2b22, flatShading: true, roughness: 0.9 }); // darker leather strap
+
+    // Forearm sleeve (glove sleeve) - cylinder pointing forward
+    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.35, 6), gloveMat);
+    forearm.rotation.x = Math.PI / 2; // Point forward
+    forearm.position.set(0, 0, 0.1);
+    armGroup.add(forearm);
+
+    // Wristband strap
+    const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.028, 0.03, 6), wristMat);
+    strap.rotation.x = Math.PI / 2;
+    strap.position.set(0, 0, -0.06);
+    armGroup.add(strap);
+
+    // Main glove hand body (box)
+    const gloveHand = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.032, 0.05), gloveMat);
+    gloveHand.position.set(0, 0, -0.1);
+    armGroup.add(gloveHand);
+
+    // Fingers (exposed skin)
+    // Thumb
+    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.025), skinMat);
+    thumb.position.set(isLeft ? 0.024 : -0.024, 0.008, -0.115);
+    thumb.rotation.y = isLeft ? -0.4 : 0.4;
+    armGroup.add(thumb);
+
+    // Index, Middle, Ring, Pinky
+    const finger1 = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.025), skinMat);
+    finger1.position.set(isLeft ? 0.015 : -0.015, -0.004, -0.13);
+    armGroup.add(finger1);
+
+    const finger2 = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.027), skinMat);
+    finger2.position.set(isLeft ? 0.005 : -0.005, -0.004, -0.132);
+    armGroup.add(finger2);
+
+    const finger3 = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.025), skinMat);
+    finger3.position.set(isLeft ? -0.005 : 0.005, -0.004, -0.13);
+    armGroup.add(finger3);
+
+    const finger4 = new THREE.Mesh(new THREE.BoxGeometry(0.009, 0.009, 0.022), skinMat);
+    finger4.position.set(isLeft ? -0.015 : 0.015, -0.004, -0.128);
+    armGroup.add(finger4);
+
+    return armGroup;
 }
