@@ -493,31 +493,31 @@ export class VoxelTerrain {
         // Center of the world is (0, 0) in voxel space
         const distFromCenter = Math.sqrt(x * x + z * z);
         
-        // Main spawn island at center (radius of 90 voxels = 270 meters)
-        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromCenter / 90.0);
+        // Circular atoll ring at radius 38 voxels (114 meters) with a thickness/span of 14 voxels (42 meters)
+        const distFromAtoll = Math.abs(distFromCenter - 38.0);
+        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromAtoll / 14.0);
         
-        // Procedural islands noise (archipelago)
-        const landNoise = this.noise.noise2d(x * 0.003, z * 0.003);
-        // Islands form where noise is above -0.1
-        const islandNoiseWeight = Math.max(0.0, (landNoise + 0.1) * 1.5);
-        
-        // Combine spawn island weight and procedural island noise
-        const landWeight = Math.max(spawnIslandWeight, islandNoiseWeight);
+        // Keep a minimum land weight of 0.35 inside the lagoon (dist < 38)
+        // to make the lagoon shallow (approx. 24m deep) instead of dropping to the abyss
+        let landWeight = spawnIslandWeight;
+        if (distFromCenter < 38.0) {
+            landWeight = Math.max(0.35, spawnIslandWeight);
+        }
         
         // Smooth falloffs
-        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.3);
-        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.6), 1.3);
+        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
+        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.5), 1.2);
         
         // Base terrain height factor using Perlin Noise fBm
         const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
         const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
         const baseHeightRaw = 4.0 + n1 + n2;
         
-        // Gentle Maldives sand dune/hill on the main island
+        // Maldives sand dune/hill height on the atoll ring
         let hillHeight = 0;
-        if (distFromCenter < 25.0) {
-            const t = 1.0 - distFromCenter / 25.0;
-            hillHeight = 3.5 * Math.pow(t, 1.4);
+        if (distFromAtoll < 14.0) {
+            const t = 1.0 - distFromAtoll / 14.0;
+            hillHeight = 11.0 * Math.pow(t, 1.3);
         }
         
         let density = 0;
