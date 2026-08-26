@@ -420,7 +420,7 @@ function init() {
     manipulatorHud.style.transition = 'opacity 0.2s, transform 0.2s';
     manipulatorHud.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
     manipulatorHud.style.backdropFilter = 'blur(4px)';
-    manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m`;
+    manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m (Hold Ctrl/Shift + Scroll)`;
     document.body.appendChild(manipulatorHud);
 
     // 7ap. Player Arms Setup
@@ -690,17 +690,17 @@ function init() {
         }
     });
 
-    // Scroll wheel listener for manipulator radius adjustment
+    // Scroll wheel listener for manipulator radius adjustment (with Ctrl/Shift) or hotbar slot switching
     window.addEventListener('wheel', (event) => {
-        if (activeSlot === 9) {
-            // Scroll up to increase, scroll down to decrease
+        if (activeSlot === 9 && (event.ctrlKey || event.shiftKey)) {
+            // Adjust manipulator radius when holding Ctrl/Shift
             if (event.deltaY < 0) {
                 manipulatorRadius = Math.min(15.0, manipulatorRadius + 0.5);
             } else {
                 manipulatorRadius = Math.max(1.0, manipulatorRadius - 0.5);
             }
             if (manipulatorHud) {
-                manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m`;
+                manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m (Hold Ctrl/Shift + Scroll)`;
                 // Add a little pop animation effect on change
                 manipulatorHud.style.transform = 'translateX(-50%) scale(1.15)';
                 setTimeout(() => {
@@ -709,6 +709,17 @@ function init() {
                     }
                 }, 100);
             }
+        } else {
+            // Otherwise cycle hotbar slots 1 to 9
+            let newSlot = activeSlot;
+            if (event.deltaY < 0) {
+                newSlot = activeSlot - 1;
+                if (newSlot < 1) newSlot = 9;
+            } else {
+                newSlot = activeSlot + 1;
+                if (newSlot > 9) newSlot = 1;
+            }
+            selectSlot(newSlot);
         }
     });
 
