@@ -52,6 +52,8 @@ const instructions = document.getElementById('instructions');
 const posInfo = document.getElementById('pos-info');
 const fpsCounter = document.getElementById('fps-counter');
 const crosshair = document.getElementById('crosshair');
+let manipulatorHud;
+let manipulatorRadius = 3.5;
 
 // FPS counting variables
 let fpsLastTime = performance.now();
@@ -398,6 +400,29 @@ function init() {
 
     scene.add(controls.getObject());
 
+    // Create Manipulator HUD element dynamically
+    manipulatorHud = document.createElement('div');
+    manipulatorHud.id = 'manipulator-hud';
+    manipulatorHud.style.position = 'absolute';
+    manipulatorHud.style.bottom = '95px';
+    manipulatorHud.style.left = '50%';
+    manipulatorHud.style.transform = 'translateX(-50%)';
+    manipulatorHud.style.color = '#fff';
+    manipulatorHud.style.fontFamily = 'sans-serif';
+    manipulatorHud.style.fontSize = '14px';
+    manipulatorHud.style.background = 'rgba(11, 29, 40, 0.75)';
+    manipulatorHud.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    manipulatorHud.style.padding = '6px 12px';
+    manipulatorHud.style.borderRadius = '12px';
+    manipulatorHud.style.fontWeight = 'bold';
+    manipulatorHud.style.pointerEvents = 'none';
+    manipulatorHud.style.opacity = '0';
+    manipulatorHud.style.transition = 'opacity 0.2s, transform 0.2s';
+    manipulatorHud.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+    manipulatorHud.style.backdropFilter = 'blur(4px)';
+    manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m`;
+    document.body.appendChild(manipulatorHud);
+
     // 7ap. Player Arms Setup
     leftArm = createArm(true);
     leftArm.position.set(-0.35, -0.32, -0.55);
@@ -620,24 +645,40 @@ function init() {
             if (manipulator) manipulator.visible = false;
             if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
+            if (manipulatorHud) {
+                manipulatorHud.style.opacity = '0';
+                manipulatorHud.style.transform = 'translateX(-50%) scale(0.9)';
+            }
         } else if (slotNum === 7) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = true;
             if (manipulator) manipulator.visible = false;
             if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
+            if (manipulatorHud) {
+                manipulatorHud.style.opacity = '0';
+                manipulatorHud.style.transform = 'translateX(-50%) scale(0.9)';
+            }
         } else if (slotNum === 9) {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = true;
             if (leftArm) leftArm.visible = false;
             if (rightArm) rightArm.visible = false;
+            if (manipulatorHud) {
+                manipulatorHud.style.opacity = '1';
+                manipulatorHud.style.transform = 'translateX(-50%) scale(1.0)';
+            }
         } else {
             if (spear) spear.visible = false;
             if (pickaxe) pickaxe.visible = false;
             if (manipulator) manipulator.visible = false;
             if (leftArm) leftArm.visible = true;
             if (rightArm) rightArm.visible = true;
+            if (manipulatorHud) {
+                manipulatorHud.style.opacity = '0';
+                manipulatorHud.style.transform = 'translateX(-50%) scale(0.9)';
+            }
         }
     }
     
@@ -646,6 +687,28 @@ function init() {
         const key = event.key;
         if (key >= '1' && key <= '9') {
             selectSlot(parseInt(key));
+        }
+    });
+
+    // Scroll wheel listener for manipulator radius adjustment
+    window.addEventListener('wheel', (event) => {
+        if (activeSlot === 9) {
+            // Scroll up to increase, scroll down to decrease
+            if (event.deltaY < 0) {
+                manipulatorRadius = Math.min(15.0, manipulatorRadius + 0.5);
+            } else {
+                manipulatorRadius = Math.max(1.0, manipulatorRadius - 0.5);
+            }
+            if (manipulatorHud) {
+                manipulatorHud.innerText = `Manipulator Radius: ${manipulatorRadius.toFixed(1)}m`;
+                // Add a little pop animation effect on change
+                manipulatorHud.style.transform = 'translateX(-50%) scale(1.15)';
+                setTimeout(() => {
+                    if (activeSlot === 9) {
+                        manipulatorHud.style.transform = 'translateX(-50%) scale(1.0)';
+                    }
+                }, 100);
+            }
         }
     });
 
@@ -960,12 +1023,12 @@ function handleTerrainInteraction() {
 
     if (intersects.length > 0) {
         const hit = intersects[0];
-        // Ensure we hit a valid surface that is reasonably close (e.g. within 35 meters)
-        if (hit.distance < 35.0) {
+        // Practically infinite raycast check (up to 1000 meters)
+        if (hit.distance < 1000.0) {
             const mode = isDigging ? 'dig' : 'build';
             
-            // Dig/Build radius: 3.5 meters
-            const modified = terrain.modifyTerrain(hit.point, 3.5, mode);
+            // Use dynamic radius controlled by scroll wheel
+            const modified = terrain.modifyTerrain(hit.point, manipulatorRadius, mode);
             
             if (modified) {
                 // Instantly rebuild the dirty chunks in this frame
