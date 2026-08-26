@@ -621,19 +621,28 @@ export class VoxelTerrain {
             }
         }
 
-        // Diagnostics for debugging missing chunk column (0,0)
+        // Diagnostics for debugging missing chunk columns around the player
         if (!this.debugTimer) this.debugTimer = 0;
         this.debugTimer++;
         if (this.debugTimer % 90 === 0) {
-            console.log("--- CHUNK DEBUG (0,0) ---");
-            for (let cy = 0; cy < this.chunksY; cy++) {
-                const key = `0,${cy},0`;
-                const chunk = this.loadedChunks.get(key);
-                if (chunk) {
-                    const posCount = chunk.geometry.attributes.position ? chunk.geometry.attributes.position.count : 0;
-                    console.log(`Chunk ${key}: dirty=${chunk.dirty}, initialized=${chunk.initialized}, visible=${chunk.mesh.visible}, vertices=${posCount}, parent=${chunk.mesh.parent ? "yes" : "no"}`);
-                } else {
-                    console.log(`Chunk ${key}: NOT LOADED`);
+            console.log("--- CHUNK DIAGNOSTICS (5x5 around player) ---");
+            console.log(`Player Chunk coordinate: pcx=${pcx}, pcz=${pcz}`);
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                    const cx = pcx + dx;
+                    const cz = pcz + dz;
+                    const states = [];
+                    for (let cy = 0; cy < this.chunksY; cy++) {
+                        const key = `${cx},${cy},${cz}`;
+                        const chunk = this.loadedChunks.get(key);
+                        if (chunk) {
+                            const posCount = chunk.geometry.attributes.position ? chunk.geometry.attributes.position.count : 0;
+                            states.push(`cy=${cy}:v=${posCount}${chunk.dirty ? '(D)' : ''}`);
+                        } else {
+                            states.push(`cy=${cy}:NL`);
+                        }
+                    }
+                    console.log(`Col (${cx},${cz}): ${states.join(" | ")}`);
                 }
             }
             console.log("Queue size:", this.chunkBuildQueue.length);
