@@ -1269,8 +1269,15 @@ function animate() {
 
         // Floor collision check
         if (camera.position.y - playerHeight <= groundHeight) {
-            // Landing on the ground
-            camera.position.y = groundHeight + playerHeight;
+            const targetY = groundHeight + playerHeight;
+            const diff = targetY - camera.position.y;
+            // If the difference is large (falling from high up, or digging under feet), snap instantly.
+            // Otherwise, interpolate Y smoothly over time to eliminate marching cubes staircase jitter.
+            if (Math.abs(diff) > 0.4) {
+                camera.position.y = targetY;
+            } else {
+                camera.position.y += diff * 25.0 * delta;
+            }
             velocity.y = 0;
             isGrounded = true;
         } else {

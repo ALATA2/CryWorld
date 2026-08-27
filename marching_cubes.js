@@ -870,7 +870,7 @@ export class VoxelTerrain {
                 // Find exact boundary Y using a mini binary search
                 let low = testPos.y;
                 let high = testPos.y + step;
-                for (let b = 0; b < 6; b++) {
+                for (let b = 0; b < 10; b++) {
                     const mid = (low + high) / 2.0;
                     testPos.y = mid;
                     if (this.isPositionSolid(testPos)) {
