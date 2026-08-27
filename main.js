@@ -1970,6 +1970,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     while (treesPlaced < palmTreesCount && attempts < 1500) {
         attempts++;
         const wx = (Math.random() - 0.5) * 700.0;
+        if (wx > 135.0) continue; // Keep eastern islands barren/arid!
         const wz = (Math.random() - 0.5) * 700.0;
         
         // Sample height from global height map
@@ -2012,6 +2013,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     while (pinesPlaced < pineTreesCount && attempts < 1000) {
         attempts++;
         const wx = (Math.random() - 0.5) * 700.0;
+        if (wx > 135.0) continue; // Keep eastern islands barren/arid!
         const wz = (Math.random() - 0.5) * 700.0;
         
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);

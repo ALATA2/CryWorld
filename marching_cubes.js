@@ -106,7 +106,9 @@ class PerlinNoise {
 // TERRAIN HELPERS & STATIC ALLOCATIONS
 // ==========================================
 const _sandColor = new THREE.Color(0xfffdf0); // Ultra bright white coral sand (Maldives style)
+const _goldenSandColor = new THREE.Color(0xe0b970); // Warm golden sand for eastern islands
 const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
+const _barrenColor = new THREE.Color(0x948366); // Dry, barren dirt/scrub for eastern islands
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
 const _seabedColor = new THREE.Color(0x0096b2); // Vibrant tropical turquoise-blue
 
@@ -154,42 +156,49 @@ function getNormalAt(terrain, vx, vy, vz, target) {
     return target.set(-dx / len, -dy / len, -dz / len).normalize();
 }
 
-function getColorAt(worldY, normal, target) {
+function getColorAt(worldX, worldY, worldZ, normal, target) {
     const slope = normal.y; // 1.0 = flat upwards, 0.0 = vertical wall
     
+    // Check if we are in the eastern region (X > 135.0m, which is 45 voxels)
+    const isEast = (worldX > 135.0);
+    
+    const sand = isEast ? _goldenSandColor : _sandColor;
+    const vegetation = isEast ? _barrenColor : _grassColor;
+    const rock = _rockColor;
+
     if (slope < 0.60) {
         // Very steep cliffs are always light grey granite rock
-        target.copy(_rockColor);
+        target.copy(rock);
     } else {
-        // Maldives style beach (sea level is 120.0m)
+        // Maldives style beach (sea level is 120.0m) vs Golden Beach
         if (worldY < 125.0) {
             // Under sea level Y=120.0m
             if (worldY < 120.0) {
-                // Seabed: transition sand color into a tropical turquoise color to avoid flat white/grey square under water
+                // Seabed: transition sand color into a tropical turquoise color
                 const depthFactor = Math.min((120.0 - worldY) / 120.0, 1.0);
-                target.lerpColors(_sandColor, _seabedColor, depthFactor);
+                target.lerpColors(sand, _seabedColor, depthFactor);
             } else {
-                target.copy(_sandColor);
+                target.copy(sand);
             }
         } else if (worldY < 128.0) {
             // Beach to grass transition (125m to 128m)
             const t = (worldY - 125.0) / 3.0;
-            target.lerpColors(_sandColor, _grassColor, t);
+            target.lerpColors(sand, vegetation, t);
         } else if (worldY < 155.0) {
-            // Grass slopes
-            target.copy(_grassColor);
+            // Vegetation slopes
+            target.copy(vegetation);
         } else if (worldY < 165.0) {
-            // Grass to rock transition
+            // Vegetation to rock transition
             const t = (worldY - 155.0) / 10.0;
-            target.lerpColors(_grassColor, _rockColor, t);
+            target.lerpColors(vegetation, rock, t);
         } else {
-            target.copy(_rockColor);
+            target.copy(rock);
         }
         
         // Blend slopes that are slightly steep towards rock
         if (slope < 0.75) {
             const t = (0.75 - slope) / 0.15;
-            target.lerp(_rockColor, t);
+            target.lerp(rock, t);
         }
     }
     
@@ -355,13 +364,13 @@ class VoxelChunk {
 
                         // Colors
                         _tempNormal.set(n0x, n0y, n0z);
-                        getColorAt(pt0.y * voxelScale, _tempNormal, _tempColor0);
+                        getColorAt(pt0.x * voxelScale, pt0.y * voxelScale, pt0.z * voxelScale, _tempNormal, _tempColor0);
                         
                         _tempNormal.set(n1x, n1y, n1z);
-                        getColorAt(pt1.y * voxelScale, _tempNormal, _tempColor1);
+                        getColorAt(pt1.x * voxelScale, pt1.y * voxelScale, pt1.z * voxelScale, _tempNormal, _tempColor1);
                         
                         _tempNormal.set(n2x, n2y, n2z);
-                        getColorAt(pt2.y * voxelScale, _tempNormal, _tempColor2);
+                        getColorAt(pt2.x * voxelScale, pt2.y * voxelScale, pt2.z * voxelScale, _tempNormal, _tempColor2);
 
                         // Push geometries scaled to physical meters
                         positions.push(
@@ -518,8 +527,21 @@ export class VoxelTerrain {
         
         const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
         
-        // Combine land weights of atoll and volcano
-        const landWeight = Math.max(atollWeight, volcanoWeight);
+        // 3. Arid, barren eastern islands (x > 45 voxels, which is 135 meters)
+        // Irregular hilly and flat archipelago as seen in the satellite layout
+        let eastIslandWeight = 0.0;
+        if (x > 45.0) {
+            const easternMask = Math.min(Math.max((x - 45.0) / 15.0, 0.0), 1.0); // Smoothly fade in to the east
+            const nEast1 = this.noise.noise2d(x * 0.035, z * 0.035);
+            const nEast2 = this.noise.noise2d(x * 0.11, z * 0.11) * 0.35;
+            const eastNoise = nEast1 + nEast2; // ranges from -1.35 to 1.35
+            
+            // Land forms where noise exceeds a threshold
+            eastIslandWeight = Math.max(0.0, (eastNoise - 0.08) * 1.5) * easternMask;
+        }
+        
+        // Combine land weights of atoll, volcano, and eastern islands
+        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight);
         
         // Smooth falloffs
         const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
@@ -550,6 +572,12 @@ export class VoxelTerrain {
                 vHill -= 4.5 * Math.pow(craterT, 1.5); // Crater depression
             }
             hillHeight = Math.max(hillHeight, vHill);
+        }
+        
+        // Eastern islands hill height (low, flat, slightly hilly terrain)
+        if (x > 45.0 && eastIslandWeight > 0.0) {
+            const eHill = eastIslandWeight * 5.0; // Soft rolling hills, max 15 meters above base height
+            hillHeight = Math.max(hillHeight, eHill);
         }
         
         let density = 0;
