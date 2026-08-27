@@ -527,28 +527,33 @@ export class VoxelTerrain {
         
         const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
         
-        // 3. Three distinct, solid eastern islands as seen in the satellite layout
+        // 3. Three distinct, solid eastern islands as seen in the satellite layout (scaled up significantly)
         // Shoreline noise for realistic irregularity
-        const eastShoreNoise = this.noise.noise2d(x * 0.06, z * 0.06) * 6.0;
+        const eastShoreNoise = this.noise.noise2d(x * 0.05, z * 0.05) * 7.0;
         
-        // Island A (North-East): Center (75, 80), Radius 22 voxels
-        const dxA = x - 75.0;
-        const dzA = z - 80.0;
+        // Island A (North-East): Center (80, 80), Radius 38 voxels (approx 114 meters)
+        const dxA = (x - 80.0) * 1.2;
+        const dzA = (z - 80.0) * 0.9;
         const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
-        const weightA = Math.max(0.0, 1.0 - distA / 22.0);
+        const weightA = Math.max(0.0, 1.0 - distA / 38.0);
         
-        // Island B (Center-East): Center (65, 10), Radius 18 voxels
-        const dxB = x - 65.0;
-        const dzB = z - 10.0;
+        // Island B (Center-East): Center (75, 10), Radius 32 voxels (approx 96 meters)
+        const dxB = (x - 75.0) * 1.2;
+        const dzB = (z - 10.0) * 1.0;
         const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
-        const weightB = Math.max(0.0, 1.0 - distB / 18.0);
+        const weightB = Math.max(0.0, 1.0 - distB / 32.0);
         
-        // Island C (South-East): Center (80, -55), Radius 32 voxels (stretched slightly vertically)
-        const dxC = x - 80.0;
-        let dzC = z - (-55.0);
-        const distCRaw = Math.sqrt(dxC * dxC + dzC * dzC * 0.8);
-        const distC = distCRaw + eastShoreNoise;
-        const weightC = Math.max(0.0, 1.0 - distC / 32.0);
+        // Island C (South-East): Center (80, -60), Radius 48 voxels (approx 144 meters)
+        const dxC = (x - 80.0) * 1.25;
+        let localDzC = z - (-60.0);
+        if (localDzC < 0.0) {
+            localDzC = localDzC * 0.9; // Adjust south stretch to avoid border clip
+        } else {
+            localDzC = localDzC * 0.6; // Stretch northwards
+        }
+        const dzC = localDzC;
+        const distC = Math.sqrt(dxC * dxC + dzC * dzC) + eastShoreNoise;
+        const weightC = Math.max(0.0, 1.0 - distC / 48.0);
         
         // Combine the three eastern islands
         const eastIslandWeight = Math.max(weightA, weightB, weightC);
