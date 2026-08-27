@@ -159,8 +159,8 @@ function getNormalAt(terrain, vx, vy, vz, target) {
 function getColorAt(worldX, worldY, worldZ, normal, target) {
     const slope = normal.y; // 1.0 = flat upwards, 0.0 = vertical wall
     
-    // Check if we are in the eastern region (X > 135.0m, which is 45 voxels)
-    const isEast = (worldX > 135.0);
+    // Check if we are in the eastern region (X > 105.0m, which is 35 voxels)
+    const isEast = (worldX > 105.0);
     
     const sand = isEast ? _goldenSandColor : _sandColor;
     const vegetation = isEast ? _barrenColor : _grassColor;
@@ -527,18 +527,31 @@ export class VoxelTerrain {
         
         const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
         
-        // 3. Arid, barren eastern islands (x > 45 voxels, which is 135 meters)
-        // Irregular hilly and flat archipelago as seen in the satellite layout
-        let eastIslandWeight = 0.0;
-        if (x > 45.0) {
-            const easternMask = Math.min(Math.max((x - 45.0) / 15.0, 0.0), 1.0); // Smoothly fade in to the east
-            const nEast1 = this.noise.noise2d(x * 0.035, z * 0.035);
-            const nEast2 = this.noise.noise2d(x * 0.11, z * 0.11) * 0.35;
-            const eastNoise = nEast1 + nEast2; // ranges from -1.35 to 1.35
-            
-            // Land forms where noise exceeds a threshold
-            eastIslandWeight = Math.max(0.0, (eastNoise - 0.08) * 1.5) * easternMask;
-        }
+        // 3. Three distinct, solid eastern islands as seen in the satellite layout
+        // Shoreline noise for realistic irregularity
+        const eastShoreNoise = this.noise.noise2d(x * 0.06, z * 0.06) * 6.0;
+        
+        // Island A (North-East): Center (75, 80), Radius 22 voxels
+        const dxA = x - 75.0;
+        const dzA = z - 80.0;
+        const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
+        const weightA = Math.max(0.0, 1.0 - distA / 22.0);
+        
+        // Island B (Center-East): Center (65, 10), Radius 18 voxels
+        const dxB = x - 65.0;
+        const dzB = z - 10.0;
+        const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
+        const weightB = Math.max(0.0, 1.0 - distB / 18.0);
+        
+        // Island C (South-East): Center (80, -55), Radius 32 voxels (stretched slightly vertically)
+        const dxC = x - 80.0;
+        let dzC = z - (-55.0);
+        const distCRaw = Math.sqrt(dxC * dxC + dzC * dzC * 0.8);
+        const distC = distCRaw + eastShoreNoise;
+        const weightC = Math.max(0.0, 1.0 - distC / 32.0);
+        
+        // Combine the three eastern islands
+        const eastIslandWeight = Math.max(weightA, weightB, weightC);
         
         // Combine land weights of atoll, volcano, and eastern islands
         const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight);
@@ -575,8 +588,9 @@ export class VoxelTerrain {
         }
         
         // Eastern islands hill height (low, flat, slightly hilly terrain)
-        if (x > 45.0 && eastIslandWeight > 0.0) {
-            const eHill = eastIslandWeight * 5.0; // Soft rolling hills, max 15 meters above base height
+        if (x > 35.0 && eastIslandWeight > 0.0) {
+            const hillNoise = this.noise.noise2d(x * 0.08, z * 0.08) * 1.5;
+            const eHill = Math.max(0.0, eastIslandWeight * 6.0 + hillNoise); // Soft rolling hills, max 22.5m above base height
             hillHeight = Math.max(hillHeight, eHill);
         }
         
