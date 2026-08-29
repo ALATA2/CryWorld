@@ -303,36 +303,64 @@ function init() {
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Map world position XZ to heightmap UV (footprint 768x768 centered at 0,0)
-         vec2 heightmapUV = (worldPosition.xz + 384.0) / 768.0;
-         float depthVal = 120.0; // Default to deep ocean outside heightmap bounds
-         float foamIntensity = 0.0;
-         if (heightmapUV.x >= 0.0 && heightmapUV.x <= 1.0 && heightmapUV.y >= 0.0 && heightmapUV.y <= 1.0) {
-             float groundHeight = texture2D(heightmapTexture, heightmapUV).r * 192.0;
-             depthVal = max(0.0, 120.0 - groundHeight);
-             
-             // If shallow, generate waves breaking against the shore/object
-             if (depthVal > 0.0 && depthVal < 2.2) {
-                 float depthFactor = 1.0 - (depthVal / 2.2);
-                 
-                 // Breathing wave wave cycle (period: ~4.5 seconds)
-                 float waveCycle = sin(time * 1.4 - depthVal * 7.5) * 0.5 + 0.5;
-                 
-                 // Foam is strong at the wave front and in very shallow water
-                 foamIntensity = smoothstep(0.35, 0.85, depthFactor * waveCycle) * 0.85;
-                 
-                 // Fine noise bubble texture
-                 float bubbleNoise = texture2D(normalSampler, worldPosition.xz * 0.2 + time * 0.08).r;
-                 foamIntensity += bubbleNoise * 0.25 * smoothstep(0.1, 0.7, foamIntensity);
-                 foamIntensity = clamp(foamIntensity, 0.0, 1.0);
-             }
+        `// Analytical world-space terrain height and distance calculations (infinite bounds, 0 clipping)
+         // 1. Central Atoll Ring (Radius 114m, Span 66m)
+         float distAtoll = abs(length(worldPosition.xz) - 114.0);
+         float atollLand = max(0.0, 1.0 - distAtoll / 66.0);
+         if (length(worldPosition.xz) < 114.0) {
+             atollLand = max(0.40, atollLand); // Turquoise lagoon interior
          }
-         
-         // depth-based transparency: mix between 0.18 (very clear shore) and 0.96 (dark deep ocean)
-         float depthAlpha = mix(0.18, 0.96, 1.0 - exp(-0.065 * depthVal));
-         
-         vec3 finalColor = mix(outgoingLight, vec3(0.92, 0.96, 1.0), foamIntensity);
-         float finalAlpha = mix(depthAlpha, 0.95, foamIntensity);
+
+         // 2. Volcano Island (Center 0, 285; Radius 126m, stretched south)
+         vec2 vPos = worldPosition.xz - vec2(0.0, 285.0);
+         if (vPos.y < 0.0) vPos.y *= 0.5;
+         float distVolcano = length(vPos);
+         float volcanoLand = max(0.0, 1.0 - distVolcano / 126.0);
+
+         // 3. Quadrupled Eastern Archipelago
+         vec2 posA = (worldPosition.xz - vec2(750.0, 720.0)) * vec2(1.15, 0.85);
+         float landA = max(0.0, 1.0 - length(posA) / 360.0);
+
+         vec2 posB = (worldPosition.xz - vec2(660.0, 60.0)) * vec2(1.1, 0.95);
+         float landB = max(0.0, 1.0 - length(posB) / 300.0);
+
+         vec2 posC = (worldPosition.xz - vec2(780.0, -660.0)) * vec2(1.15, 0.70);
+         float landC = max(0.0, 1.0 - length(posC) / 450.0);
+
+         float landWeight = max(max(atollLand, volcanoLand), max(max(landA, landB), landC));
+
+         // Shoreline depth: 1.0 = deep ocean (depthVal = 40.0), 0.0 = shore (depthVal = 0.0)
+         float depthVal = max(0.0, (1.0 - landWeight) * 40.0);
+         if (landWeight > 0.52) depthVal = 0.0; // Beach / Island interior
+
+         // Dynamic shoreline foam waves
+         float foamIntensity = 0.0;
+         if (landWeight > 0.35 && landWeight <= 0.55) {
+             float shoreEdge = (landWeight - 0.35) / 0.20;
+             float wave = sin(time * 1.5 - (1.0 - shoreEdge) * 6.0) * 0.5 + 0.5;
+             foamIntensity = smoothstep(0.40, 0.88, shoreEdge * wave) * 0.80;
+             
+             float bubbleNoise = texture2D(normalSampler, worldPosition.xz * 0.15 + time * 0.05).r;
+             foamIntensity += bubbleNoise * 0.25 * smoothstep(0.2, 0.7, shoreEdge);
+             foamIntensity = clamp(foamIntensity, 0.0, 1.0);
+         }
+
+         // Tropical water depth gradient
+         vec3 shallowWaterColor = vec3(0.05, 0.62, 0.75); // Vibrant turquoise shallows
+         vec3 deepWaterColor = vec3(0.01, 0.14, 0.28);    // Rich oceanic navy blue
+         float depthFactor = 1.0 - exp(-0.075 * depthVal);
+         vec3 waterBodyColor = mix(shallowWaterColor, deepWaterColor, depthFactor);
+
+         // Blend surface reflection with water depth body color
+         vec3 surfaceColor = mix(outgoingLight, waterBodyColor, 0.35);
+
+         // Blend white foam waves
+         vec3 finalColor = mix(surfaceColor, vec3(0.95, 0.98, 1.0), foamIntensity);
+
+         // Semi-transparent alpha (0.50 at shallow shore, 0.92 in deep ocean)
+         float depthAlpha = mix(0.50, 0.92, depthFactor);
+         float finalAlpha = mix(depthAlpha, 0.96, foamIntensity);
+
          gl_FragColor = vec4(finalColor, finalAlpha);`
     );
     

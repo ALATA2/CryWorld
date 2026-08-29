@@ -105,12 +105,12 @@ class PerlinNoise {
 // ==========================================
 // TERRAIN HELPERS & STATIC ALLOCATIONS
 // ==========================================
-const _sandColor = new THREE.Color(0xfffdf0); // Ultra bright white coral sand (Maldives style)
+const _sandColor = new THREE.Color(0xf0ebd8); // Soft warm white coral sand
 const _goldenSandColor = new THREE.Color(0xe0b970); // Warm golden sand for eastern islands
 const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
 const _barrenColor = new THREE.Color(0x948366); // Dry, barren dirt/scrub for eastern islands
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
-const _seabedColor = new THREE.Color(0x0096b2); // Vibrant tropical turquoise-blue
+const _seabedColor = new THREE.Color(0x086b7c); // Rich tropical turquoise-blue seabed reef
 
 const _vlist = Array.from({ length: 12 }, () => new THREE.Vector3());
 const _p0 = new THREE.Vector3();
@@ -147,7 +147,7 @@ function getNormalAt(terrain, vx, vy, vz, target) {
     
     const dx = terrain.getDensity(rx + 1, ry, rz) - terrain.getDensity(rx - 1, ry, rz);
     const dy = terrain.getDensity(rx, ry + 1, rz) - terrain.getDensity(rx, ry - 1, rz);
-    const dz = terrain.getDensity(rx, ry, rz + 1) - terrain.getDensity(rx, ry, rz - 1);
+    const dz = terrain.getDensity(rx, ry, rz + 1) - terrain.getDensity(rx, ry - 1, rz);
     
     const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
     if (len === 0) {
@@ -174,8 +174,8 @@ function getColorAt(worldX, worldY, worldZ, normal, target) {
         if (worldY < 125.0) {
             // Under sea level Y=120.0m
             if (worldY < 120.0) {
-                // Seabed: transition sand color into a tropical turquoise color
-                const depthFactor = Math.min((120.0 - worldY) / 120.0, 1.0);
+                // Seabed: fast transition from shoreline sand into deep coral turquoise / ocean reef
+                const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
                 target.lerpColors(sand, _seabedColor, depthFactor);
             } else {
                 target.copy(sand);
