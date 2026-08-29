@@ -9,7 +9,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, heightmapTexture, heightmapData;
+let terrain, water, sky, sun, planetGlobe, atmosphereGlow, heightmapTexture, heightmapData;
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
 let activeSlot = 3;
@@ -91,7 +91,7 @@ function init() {
     scene.background = new THREE.Color(0x8ce3ff); // Caribbean cyan horizon background
     scene.fog = new THREE.Fog(0x8ce3ff, 250, 600); // Linear fog to mask chunk rendering boundary
 
-    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 3000);
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 45000);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
     camera.position.set(0, 20, 45); // Start on beach slope
 
@@ -193,7 +193,7 @@ function init() {
                 float h = max(0.0, dir.y);
                 vec3 skyColor = mix(bottomColor, topColor, pow(h, exponent));
                 
-                // Add crisp stars in space when starIntensity > 0
+                // Add crisp stars in space when starIntensity > 0 (360 degrees cosmos)
                 if (starIntensity > 0.0) {
                     float stars = getStars(dir);
                     vec3 starTint = mix(vec3(0.85, 0.93, 1.0), vec3(1.0, 0.92, 0.78), hash31(floor(dir * 260.0)));
@@ -203,8 +203,8 @@ function init() {
                 // Add a soft sun disk and corona glow
                 float sunGlow = max(0.0, dot(dir, normalize(sunDirection)));
                 vec3 sunColor = vec3(1.0, 1.0, 0.95);
-                skyColor += sunColor * pow(sunGlow, 180.0) * 0.85; // Sun disk core
-                skyColor += sunColor * pow(sunGlow, 12.0) * 0.20 * (1.0 - starIntensity * 0.5);  // Corona shrinks in vacuum
+                skyColor += sunColor * pow(sunGlow, 220.0) * 1.0; // Sun disk core
+                skyColor += sunColor * pow(sunGlow, 14.0) * 0.25 * (1.0 - starIntensity * 0.6); // Corona
                 
                 gl_FragColor = vec4(skyColor, 1.0);
             }
@@ -213,7 +213,7 @@ function init() {
         depthWrite: false
     });
     sky = new THREE.Mesh(skyGeo, skyMat);
-    sky.scale.setScalar(4000); // Scale comfortably inside far clipping plane
+    sky.scale.setScalar(35000); // Scale comfortably inside 45km celestial clipping plane
     scene.add(sky);
 
     sun = new THREE.Vector3();
@@ -238,15 +238,21 @@ function init() {
         // Match fog to clear sky horizon blue
         scene.fog.color.setHex(0x8ce3ff);
         
-        // Dynamically update water shader sunlight direction if initialized
+        // Dynamically update water and planetary body sunlight direction
         if (water) {
             water.material.uniforms['sunDirection'].value.copy(sun).normalize();
+        }
+        if (planetGlobe && planetGlobe.material && planetGlobe.material.uniforms) {
+            planetGlobe.material.uniforms['sunDirection'].value.copy(sun).normalize();
+        }
+        if (atmosphereGlow && atmosphereGlow.material && atmosphereGlow.material.uniforms) {
+            atmosphereGlow.material.uniforms['sunDirection'].value.copy(sun).normalize();
         }
     }
     updateSky();
 
-    // 5. Water Setup
-    const waterGeometry = new THREE.PlaneGeometry(10000, 10000);
+    // 5. Water Setup (Smooth Circular Ocean disc seamlessly integrated with the planet body)
+    const waterGeometry = new THREE.CircleGeometry(2600, 64);
     water = new Water(
         waterGeometry,
         {
@@ -301,6 +307,115 @@ function init() {
     );
     
     scene.add(water);
+
+    // 5b. Spherical 3D Planetary Body & Atmospheric Limb (Orbital Planetary Globe)
+    // Radius R = 2200m. Top apex sits at Y = 119.2m (just below sea level 120m).
+    const planetRadius = 2200.0;
+    const planetCenterY = 119.2 - planetRadius; // Y = -2080.8
+    const planetGeo = new THREE.SphereGeometry(planetRadius, 96, 64);
+    const planetMat = new THREE.ShaderMaterial({
+        uniforms: {
+            sunDirection: { value: sun },
+            eyePosition: { value: new THREE.Vector3() },
+            oceanColor: { value: new THREE.Color(0x013d56) } // Deep Caribbean ocean
+        },
+        vertexShader: `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+            void main() {
+                vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPos.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+            uniform vec3 sunDirection;
+            uniform vec3 eyePosition;
+            uniform vec3 oceanColor;
+
+            void main() {
+                vec3 N = normalize(vNormal);
+                vec3 L = normalize(sunDirection);
+                vec3 V = normalize(eyePosition - vWorldPosition);
+
+                // Day / Night light terminator
+                float NdotL = dot(N, L);
+                float dayFactor = smoothstep(-0.20, 0.25, NdotL);
+
+                // Base ocean with spherical depth shading
+                vec3 baseColor = mix(oceanColor * 0.12, oceanColor, dayFactor);
+
+                // Specular reflection of the sun on the oceanic sphere (sun glint)
+                vec3 H = normalize(L + V);
+                float NdotH = max(0.0, dot(N, H));
+                float specular = pow(NdotH, 64.0) * dayFactor;
+                vec3 sunGlint = vec3(1.0, 0.96, 0.88) * specular * 1.2;
+
+                // Atmospheric Rayleigh limb glow (Fresnel rim around the silhouette)
+                float rim = 1.0 - max(0.0, dot(V, N));
+                float atmoRim = pow(rim, 3.8);
+                vec3 atmoColor = vec3(0.20, 0.65, 1.0) * atmoRim * (dayFactor * 0.85 + 0.15) * 1.8;
+
+                // Soft inner atmospheric haze
+                float innerHaze = pow(rim, 1.6) * 0.20 * dayFactor;
+                atmoColor += vec3(0.15, 0.55, 0.95) * innerHaze;
+
+                vec3 finalColor = baseColor + sunGlint + atmoColor;
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `
+    });
+    planetGlobe = new THREE.Mesh(planetGeo, planetMat);
+    planetGlobe.position.set(0, planetCenterY, 0);
+    scene.add(planetGlobe);
+
+    // Atmospheric Glow Halo (surrounds the planetary sphere in space)
+    const atmoGeo = new THREE.SphereGeometry(planetRadius * 1.025, 64, 48);
+    const atmoMat = new THREE.ShaderMaterial({
+        uniforms: {
+            sunDirection: { value: sun },
+            eyePosition: { value: new THREE.Vector3() }
+        },
+        vertexShader: `
+            varying vec3 vNormal;
+            varying vec3 vWorldPosition;
+            void main() {
+                vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPos.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vNormal;
+            varying vec3 vWorldPosition;
+            uniform vec3 sunDirection;
+            uniform vec3 eyePosition;
+            void main() {
+                vec3 V = normalize(eyePosition - vWorldPosition);
+                vec3 N = normalize(vNormal);
+                vec3 L = normalize(sunDirection);
+                
+                float rim = 1.0 - max(0.0, dot(V, N));
+                float atmoGlow = pow(rim, 3.0);
+                
+                float dayFactor = smoothstep(-0.25, 0.35, dot(N, L));
+                vec3 color = vec3(0.25, 0.65, 1.0) * atmoGlow * (dayFactor * 0.85 + 0.15) * 2.0;
+                
+                gl_FragColor = vec4(color, atmoGlow * (dayFactor * 0.9 + 0.1));
+            }
+        `,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false
+    });
+    atmosphereGlow = new THREE.Mesh(atmoGeo, atmoMat);
+    atmosphereGlow.position.set(0, planetCenterY, 0);
+    scene.add(atmosphereGlow);
 
     // 6. Marching Cubes Voxel Terrain Setup
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
@@ -1402,14 +1517,24 @@ function animate() {
         }
         
         scene.fog.color.copy(currentFogColor);
-        // From 1.1km up, the atmosphere thins completely (fog recedes to 30km for razor-sharp view of the planet)
-        scene.fog.near = 250.0 + (3000.0 - 250.0) * altFactor;
-        scene.fog.far = 600.0 + (30000.0 - 600.0) * altFactor;
+        // From 1.1km up, the atmosphere thins completely (fog recedes to 45km for razor-sharp view of the planet globe)
+        scene.fog.near = 250.0 + (10000.0 - 250.0) * altFactor;
+        scene.fog.far = 600.0 + (45000.0 - 600.0) * altFactor;
         
         renderer.toneMappingExposure = 1.15;
 
         if (water && water.material && water.material.uniforms['alpha']) {
             water.material.uniforms['alpha'].value = 0.88;
+        }
+
+        // Update planetary globe and atmospheric halo uniforms
+        if (planetGlobe && planetGlobe.material && planetGlobe.material.uniforms) {
+            planetGlobe.material.uniforms['sunDirection'].value.copy(sun);
+            planetGlobe.material.uniforms['eyePosition'].value.copy(camera.position);
+        }
+        if (atmosphereGlow && atmosphereGlow.material && atmosphereGlow.material.uniforms) {
+            atmosphereGlow.material.uniforms['sunDirection'].value.copy(sun);
+            atmosphereGlow.material.uniforms['eyePosition'].value.copy(camera.position);
         }
     }
 
