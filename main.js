@@ -288,6 +288,17 @@ function init() {
              surfaceNormal = -surfaceNormal;
          }`
     );
+
+    // Distance-based optical absorption:
+    // Close by: clear and semi-transparent (alpha ~ 0.85)
+    // Distance / deep: smoothly increases opacity to 0.98, obscuring deep and distant underwater terrain
+    water.material.fragmentShader = water.material.fragmentShader.replace(
+        'gl_FragColor = vec4( outgoingLight, alpha );',
+        `float viewDist = length(worldPosition.xyz - eye);
+         float distFade = smoothstep(15.0, 120.0, viewDist);
+         float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
+         gl_FragColor = vec4( outgoingLight, distAlpha );`
+    );
     
     scene.add(water);
 
@@ -1398,7 +1409,7 @@ function animate() {
         renderer.toneMappingExposure = 1.15;
 
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.65;
+            water.material.uniforms['alpha'].value = 0.88;
         }
     }
 
