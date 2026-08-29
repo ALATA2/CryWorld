@@ -435,6 +435,21 @@ export class VoxelTerrain {
             side: THREE.FrontSide
         });
 
+        // Spherical Planetary Curvature Warping (R = 2200.0m)
+        this.material.onBeforeCompile = (shader) => {
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+                 vec4 worldV = modelMatrix * vec4(transformed, 1.0);
+                 float distH = length(worldV.xz);
+                 float planetR = 2200.0;
+                 if (distH < planetR) {
+                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
+                     transformed.y -= drop;
+                 }`
+            );
+        };
+
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
         this.modifiedColumns = new Set();

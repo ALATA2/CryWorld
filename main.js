@@ -286,6 +286,23 @@ function init() {
         originalOnBeforeRender.call(this, renderer, scene, camera);
     };
 
+    // Spherical Planet Curvature for water surface (R = 2200m)
+    water.material.vertexShader = water.material.vertexShader.replace(
+        'vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );',
+        `vec3 curvedPos = position;
+         vec4 worldPosCurved = modelMatrix * vec4(position, 1.0);
+         float distH = length(worldPosCurved.xz);
+         float planetR = 2200.0;
+         if (distH < planetR) {
+             float drop = planetR - sqrt(planetR * planetR - distH * distH);
+             curvedPos.z -= drop;
+         }
+         mirrorCoord = modelMatrix * vec4( curvedPos, 1.0 );
+         worldPosition = mirrorCoord.xyzw;
+         mirrorCoord = textureMatrix * mirrorCoord;
+         vec4 mvPosition = modelViewMatrix * vec4( curvedPos, 1.0 );`
+    );
+
     // Flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
@@ -2082,13 +2099,40 @@ function spawnEnvironmentObjects(scene, terrain) {
         if (g !== masterRockGeo) g.dispose();
     });
 
-    // Materials
+    // Materials with Spherical Planetary Curvature (R = 2200m)
+    function applyFoliageCurvature(mat) {
+        mat.onBeforeCompile = (shader) => {
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+                 #ifdef USE_INSTANCING
+                     vec4 worldV = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
+                 #else
+                     vec4 worldV = modelMatrix * vec4(transformed, 1.0);
+                 #endif
+                 float distH = length(worldV.xz);
+                 float planetR = 2200.0;
+                 if (distH < planetR) {
+                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
+                     transformed.y -= drop;
+                 }`
+            );
+        };
+    }
+
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, flatShading: true, roughness: 0.75, side: THREE.DoubleSide });
     const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: true, roughness: 0.90 });
     const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, flatShading: true, roughness: 0.95 });
     const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
+
+    applyFoliageCurvature(trunkMat);
+    applyFoliageCurvature(leafMat);
+    applyFoliageCurvature(coconutMat);
+    applyFoliageCurvature(pineTrunkMat);
+    applyFoliageCurvature(pineFoliageMat);
+    applyFoliageCurvature(rockMat);
 
     // Initialize/clear global instance arrays
     palmInstances = [];
