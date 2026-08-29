@@ -896,6 +896,10 @@ function setupInputListeners() {
                 if (flyInfo) {
                     flyInfo.style.display = isFlying ? 'inline' : 'none';
                 }
+                const altimeterCard = document.getElementById('altimeter-card');
+                if (altimeterCard) {
+                    altimeterCard.style.display = isFlying ? 'flex' : 'none';
+                }
             }
         }
     };
@@ -1213,12 +1217,24 @@ function animate() {
     // Update falling tree and rock physics
     updateFoliagePhysics(delta);
 
-    // 1. FPS counter update
+    // 1. FPS counter & Altimeter update
     fpsFrames++;
     if (time > fpsLastTime + 1000) {
         fpsCounter.textContent = Math.round((fpsFrames * 1000) / (time - fpsLastTime));
         fpsFrames = 0;
         fpsLastTime = time;
+    }
+
+    if (isFlying) {
+        const altMeters = Math.max(0, Math.round(camera.position.y - 120.0));
+        const altCounter = document.getElementById('alt-counter');
+        if (altCounter) {
+            if (altMeters >= 1000) {
+                altCounter.textContent = `${(altMeters / 1000).toFixed(2)} km`;
+            } else {
+                altCounter.textContent = `${altMeters} m`;
+            }
+        }
     }
 
     if (isMobile ? gameStarted : controls.isLocked) {
@@ -1251,8 +1267,8 @@ function animate() {
         // Jump execution or swim/fly upwards
         if (keyStates.Space) {
             if (isFlying) {
-                // Fly upwards
-                velocity.y += (keyStates.ShiftLeft ? 180.0 : 90.0) * delta;
+                // Fly upwards (3x speed with Shift: 270.0 vs 90.0)
+                velocity.y += (keyStates.ShiftLeft ? 270.0 : 90.0) * delta;
             } else if (inWater) {
                 // Swim upwards actively using Space
                 velocity.y += 18.0 * delta;
@@ -1262,19 +1278,19 @@ function animate() {
             }
         }
 
-        // Fly downwards with Q
+        // Fly downwards with Q (3x speed with Shift: 270.0 vs 90.0)
         if (keyStates.KeyQ && isFlying) {
-            velocity.y -= (keyStates.ShiftLeft ? 180.0 : 90.0) * delta;
+            velocity.y -= (keyStates.ShiftLeft ? 270.0 : 90.0) * delta;
         }
 
         direction.z = Number(keyStates.KeyW) - Number(keyStates.KeyS);
         direction.x = Number(keyStates.KeyA) - Number(keyStates.KeyD);
         direction.normalize(); // Ensure uniform movement speed
 
-        // Speed calculation
+        // Speed calculation (3x flight speed with Shift: 300.0 vs 100.0)
         let currentSpeed;
         if (isFlying) {
-            currentSpeed = keyStates.ShiftLeft ? 220.0 : 100.0;
+            currentSpeed = keyStates.ShiftLeft ? 300.0 : 100.0;
         } else {
             currentSpeed = keyStates.ShiftLeft ? runSpeed : moveSpeed;
             if (inWater) {

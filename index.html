@@ -89,16 +89,36 @@
             gap: 15px;
         }
 
-        .fps-card {
+        .hud-bottom-left {
             position: absolute;
             bottom: 20px;
             left: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .fps-card {
             font-size: 14px;
             font-weight: 800;
             color: #00ff88;
             border-color: rgba(0, 255, 136, 0.3);
             text-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
             pointer-events: auto;
+        }
+
+        .altimeter-card {
+            font-size: 14px;
+            font-weight: 800;
+            color: #00e5ff;
+            border-color: rgba(0, 229, 255, 0.3);
+            text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .stat-item {
@@ -617,7 +637,7 @@
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.170</div>
+        <div id="homepage-version">V 0.171</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
@@ -652,9 +672,14 @@
         <!-- Center Crosshair -->
         <div id="crosshair"></div>
 
-        <!-- Bottom Left Real-time FPS Counter -->
-        <div class="hud-card fps-card">
-            FPS: <span id="fps-counter">60</span>
+        <!-- Bottom Left Real-time FPS Counter & Altimeter (Active in Flight) -->
+        <div class="hud-bottom-left">
+            <div class="hud-card fps-card">
+                FPS: <span id="fps-counter">60</span>
+            </div>
+            <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
+                ✈️ ALT: <span id="alt-counter">0 m</span>
+            </div>
         </div>
 
         <!-- Bottom Hotbar (Survival Style) -->
