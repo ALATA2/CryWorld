@@ -1595,7 +1595,7 @@ function animate() {
 
     // 5e. Update active terrain chunks and center sky dome on the player
     if (terrain) {
-        const dynamicRenderDist = 600.0 + altFactor * 1400.0; // Expands from 600m up to 2000m in orbit
+        const dynamicRenderDist = Math.min(850.0, 500.0 + altFactor * 350.0); // 500m on ground, 850m in orbit
         terrain.updateChunksAroundPlayer(camera.position, dynamicRenderDist);
     }
     if (sky) {
