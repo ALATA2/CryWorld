@@ -127,14 +127,15 @@ function init() {
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
-    // 4. Sky and Sun Configuration (Custom Gradient Sky Dome)
+    // 4. Sky and Sun Configuration (Custom Gradient Sky Dome with Procedural Stars)
     const skyGeo = new THREE.SphereGeometry(1, 32, 15);
     const skyMat = new THREE.ShaderMaterial({
         uniforms: {
             topColor: { value: new THREE.Color(0x0078d7) }, // Deep tropical cobalt blue
             bottomColor: { value: new THREE.Color(0x8ce3ff) }, // Caribbean cyan horizon
             exponent: { value: 0.6 },
-            sunDirection: { value: new THREE.Vector3() }
+            sunDirection: { value: new THREE.Vector3() },
+            starIntensity: { value: 0.0 }
         },
         vertexShader: `
             varying vec3 vWorldPosition;
@@ -151,16 +152,59 @@ function init() {
             uniform vec3 bottomColor;
             uniform float exponent;
             uniform vec3 sunDirection;
+            uniform float starIntensity;
+
+            // Fast 3D hash for celestial coordinates
+            float hash31(vec3 p) {
+                p = fract(p * vec3(443.897, 441.423, 437.195));
+                p += dot(p, p.yzx + 19.19);
+                return fract((p.x + p.y) * p.z);
+            }
+
+            float getStars(vec3 dir) {
+                // Layer 1: Crisp brilliant stars
+                vec3 p = dir * 260.0;
+                vec3 id = floor(p);
+                vec3 f = fract(p) - 0.5;
+                float n = hash31(id);
+                float star = 0.0;
+                if (n > 0.955) {
+                    vec3 offset = vec3(hash31(id + 1.0), hash31(id + 2.0), hash31(id + 3.0)) - 0.5;
+                    float dist = length(f - offset * 0.65);
+                    float brightness = fract(n * 137.45);
+                    star = smoothstep(0.075, 0.01, dist) * (0.7 + 0.7 * brightness);
+                }
+
+                // Layer 2: Dense starry background / Milky Way dust
+                vec3 p2 = dir * 520.0;
+                vec3 id2 = floor(p2);
+                vec3 f2 = fract(p2) - 0.5;
+                float n2 = hash31(id2);
+                if (n2 > 0.982) {
+                    vec3 offset2 = vec3(hash31(id2 + 1.0), hash31(id2 + 2.0), hash31(id2 + 3.0)) - 0.5;
+                    float dist2 = length(f2 - offset2 * 0.65);
+                    star += smoothstep(0.055, 0.008, dist2) * 0.6;
+                }
+                return star;
+            }
+
             void main() {
                 vec3 dir = normalize(vWorldPosition);
                 float h = max(0.0, dir.y);
                 vec3 skyColor = mix(bottomColor, topColor, pow(h, exponent));
                 
+                // Add crisp stars in space when starIntensity > 0
+                if (starIntensity > 0.0) {
+                    float stars = getStars(dir);
+                    vec3 starTint = mix(vec3(0.85, 0.93, 1.0), vec3(1.0, 0.92, 0.78), hash31(floor(dir * 260.0)));
+                    skyColor += starTint * stars * starIntensity;
+                }
+
                 // Add a soft sun disk and corona glow
                 float sunGlow = max(0.0, dot(dir, normalize(sunDirection)));
                 vec3 sunColor = vec3(1.0, 1.0, 0.95);
-                skyColor += sunColor * pow(sunGlow, 180.0) * 0.75; // Sun disk core
-                skyColor += sunColor * pow(sunGlow, 12.0) * 0.20;  // Outer corona
+                skyColor += sunColor * pow(sunGlow, 180.0) * 0.85; // Sun disk core
+                skyColor += sunColor * pow(sunGlow, 12.0) * 0.20 * (1.0 - starIntensity * 0.5);  // Corona shrinks in vacuum
                 
                 gl_FragColor = vec4(skyColor, 1.0);
             }
@@ -1335,13 +1379,20 @@ function animate() {
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
     let altFactor = 0.0;
+    let starIntensity = 0.0;
+
     if (altitude > 180.0) {
-        altFactor = Math.min((altitude - 180.0) / 620.0, 1.0); // complete transition to orbit at Y = 800m
+        // Smooth transition to black space from 180m up to 1100m (1.1km)
+        altFactor = Math.min(Math.max((altitude - 180.0) / 920.0, 0.0), 1.0);
+    }
+    if (altitude > 350.0) {
+        // Crisp stars fade in progressively from 350m up to 1100m (1.1km)
+        starIntensity = Math.min(Math.max((altitude - 350.0) / 750.0, 0.0), 1.0);
     }
     
     const skyTopColor = new THREE.Color(0x0078d7);
     const skyBottomColor = new THREE.Color(0x8ce3ff);
-    const spaceColor = new THREE.Color(0x020205); // near black space
+    const spaceColor = new THREE.Color(0x000002); // Deep black space
  
     // Interpolate sky colors based on altitude
     const currentSkyTop = skyTopColor.clone().lerp(spaceColor, altFactor);
@@ -1350,6 +1401,9 @@ function animate() {
     if (sky && sky.material && sky.material.uniforms) {
         sky.material.uniforms['topColor'].value.copy(currentSkyTop);
         sky.material.uniforms['bottomColor'].value.copy(currentSkyBottom);
+        if (sky.material.uniforms['starIntensity']) {
+            sky.material.uniforms['starIntensity'].value = starIntensity;
+        }
     }
  
     const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
@@ -1384,8 +1438,9 @@ function animate() {
         }
         
         scene.fog.color.copy(currentFogColor);
-        scene.fog.near = 250.0 + (1000.0 - 250.0) * altFactor; // Fog recedes as we climb higher
-        scene.fog.far = 600.0 + (3000.0 - 600.0) * altFactor;  // Far distance expands up to 3km
+        // From 1.1km up, the atmosphere thins completely (fog recedes to 30km for razor-sharp view of the planet)
+        scene.fog.near = 250.0 + (3000.0 - 250.0) * altFactor;
+        scene.fog.far = 600.0 + (30000.0 - 600.0) * altFactor;
         
         renderer.toneMappingExposure = 1.15;
 
@@ -1512,7 +1567,8 @@ function animate() {
 
     // 5e. Update active terrain chunks and center sky dome on the player
     if (terrain) {
-        terrain.updateChunksAroundPlayer(camera.position, 600);
+        const dynamicRenderDist = 600.0 + altFactor * 1400.0; // Expands from 600m up to 2000m in orbit
+        terrain.updateChunksAroundPlayer(camera.position, dynamicRenderDist);
     }
     if (sky) {
         sky.position.copy(camera.position);
@@ -1977,7 +2033,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     while (treesPlaced < palmTreesCount && attempts < 1500) {
         attempts++;
         const wx = (Math.random() - 0.5) * 700.0;
-        if (wx > 135.0) continue; // Keep eastern islands barren/arid!
+        if (wx > 250.0) continue; // Keep eastern islands barren/arid!
         const wz = (Math.random() - 0.5) * 700.0;
         
         // Sample height from global height map
@@ -2020,7 +2076,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     while (pinesPlaced < pineTreesCount && attempts < 1000) {
         attempts++;
         const wx = (Math.random() - 0.5) * 700.0;
-        if (wx > 135.0) continue; // Keep eastern islands barren/arid!
+        if (wx > 250.0) continue; // Keep eastern islands barren/arid!
         const wz = (Math.random() - 0.5) * 700.0;
         
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);

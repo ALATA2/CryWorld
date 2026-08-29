@@ -159,8 +159,8 @@ function getNormalAt(terrain, vx, vy, vz, target) {
 function getColorAt(worldX, worldY, worldZ, normal, target) {
     const slope = normal.y; // 1.0 = flat upwards, 0.0 = vertical wall
     
-    // Check if we are in the eastern region (X > 105.0m, which is 35 voxels)
-    const isEast = (worldX > 105.0);
+    // Check if we are in the eastern archipelago region (X > 250.0m, which is ~83 voxels)
+    const isEast = (worldX > 250.0);
     
     const sand = isEast ? _goldenSandColor : _sandColor;
     const vegetation = isEast ? _barrenColor : _grassColor;
@@ -527,35 +527,29 @@ export class VoxelTerrain {
         
         const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
         
-        // 3. Three distinct, solid eastern islands as seen in the satellite layout (scaled up significantly)
-        // Shoreline noise for realistic irregularity
-        const eastShoreNoise = this.noise.noise2d(x * 0.05, z * 0.05) * 7.0;
+        // 3. Four-times enlarged Great Rocky Archipelago (X > 80 voxels, > 240 meters from center)
+        // Spaced out to ensure a wide open sea channel (150m+ gap) between atoll and archipelago
+        const eastShoreNoise = (this.noise.noise2d(x * 0.015, z * 0.015) * 16.0) + (this.noise.noise2d(x * 0.04, z * 0.04) * 6.0);
         
-        // Island A (North-East): Center (80, 80), Radius 38 voxels (approx 114 meters)
-        const dxA = (x - 80.0) * 1.2;
-        const dzA = (z - 80.0) * 0.9;
+        // Island A (North-East): Center (250, 240), Radius 120 voxels (~720m diameter)
+        const dxA = (x - 250.0) * 1.15;
+        const dzA = (z - 240.0) * 0.85;
         const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
-        const weightA = Math.max(0.0, 1.0 - distA / 38.0);
+        const weightA = Math.max(0.0, 1.0 - distA / 120.0);
         
-        // Island B (Center-East): Center (75, 10), Radius 32 voxels (approx 96 meters)
-        const dxB = (x - 75.0) * 1.2;
-        const dzB = (z - 10.0) * 1.0;
+        // Island B (Center-East): Center (220, 20), Radius 100 voxels (~600m diameter)
+        const dxB = (x - 220.0) * 1.1;
+        const dzB = (z - 20.0) * 0.95;
         const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
-        const weightB = Math.max(0.0, 1.0 - distB / 32.0);
+        const weightB = Math.max(0.0, 1.0 - distB / 100.0);
         
-        // Island C (South-East): Center (80, -60), Radius 48 voxels (approx 144 meters)
-        const dxC = (x - 80.0) * 1.25;
-        let localDzC = z - (-60.0);
-        if (localDzC < 0.0) {
-            localDzC = localDzC * 0.9; // Adjust south stretch to avoid border clip
-        } else {
-            localDzC = localDzC * 0.6; // Stretch northwards
-        }
-        const dzC = localDzC;
+        // Island C (South-East / Grand Island): Center (260, -220), Radius 150 voxels (~900m diameter, 1.5km long)
+        const dxC = (x - 260.0) * 1.15;
+        const dzC = (z - (-220.0)) * 0.70;
         const distC = Math.sqrt(dxC * dxC + dzC * dzC) + eastShoreNoise;
-        const weightC = Math.max(0.0, 1.0 - distC / 48.0);
+        const weightC = Math.max(0.0, 1.0 - distC / 150.0);
         
-        // Combine the three eastern islands
+        // Combine the three giant eastern islands
         const eastIslandWeight = Math.max(weightA, weightB, weightC);
         
         // Combine land weights of atoll, volcano, and eastern islands
@@ -592,10 +586,11 @@ export class VoxelTerrain {
             hillHeight = Math.max(hillHeight, vHill);
         }
         
-        // Eastern islands hill height (low, flat, slightly hilly terrain)
-        if (x > 35.0 && eastIslandWeight > 0.0) {
-            const hillNoise = this.noise.noise2d(x * 0.08, z * 0.08) * 1.5;
-            const eHill = Math.max(0.0, eastIslandWeight * 6.0 + hillNoise); // Soft rolling hills, max 22.5m above base height
+        // Eastern islands hill height (slightly hilly with broad flat plains and rolling plateaus)
+        if (x > 80.0 && eastIslandWeight > 0.0) {
+            const t = Math.pow(eastIslandWeight, 1.3);
+            const hillNoise = this.noise.noise2d(x * 0.025, z * 0.025) * 2.5;
+            const eHill = Math.max(0.0, t * 10.0 + hillNoise); // max elevation ~30m above base
             hillHeight = Math.max(hillHeight, eHill);
         }
         
@@ -908,26 +903,69 @@ export class VoxelTerrain {
     getEstimatedSurfaceHeight(vx, vz) {
         const distFromCenter = Math.sqrt(vx * vx + vz * vz);
         
-        // Main spawn island at center (radius of 90 voxels)
-        const spawnIslandWeight = Math.max(0.0, 1.0 - distFromCenter / 90.0);
+        // 1. Atoll ring at 38 voxels
+        const distFromAtoll = Math.abs(distFromCenter - 38.0);
+        const atollWeightRaw = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
+        let atollWeight = atollWeightRaw;
+        if (distFromCenter < 38.0) {
+            atollWeight = Math.max(0.35, atollWeightRaw);
+        }
         
-        // Procedural islands noise (archipelago)
-        const landNoise = this.noise.noise2d(vx * 0.003, vz * 0.003);
-        const islandNoiseWeight = Math.max(0.0, (landNoise + 0.1) * 1.5);
+        // 2. Volcano island at (0, 95)
+        const dx = vx;
+        let dz = vz - 95.0;
+        if (dz < 0.0) dz = dz * 0.5;
+        const distToVolcanoRaw = Math.sqrt(dx * dx + dz * dz);
+        const shoreNoise = this.noise.noise2d(vx * 0.08, vz * 0.08) * 5.0;
+        const distToVolcano = distToVolcanoRaw + shoreNoise;
+        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
+
+        // 3. Great Rocky Archipelago
+        const eastShoreNoise = (this.noise.noise2d(vx * 0.015, vz * 0.015) * 16.0) + (this.noise.noise2d(vx * 0.04, vz * 0.04) * 6.0);
+        const dxA = (vx - 250.0) * 1.15;
+        const dzA = (vz - 240.0) * 0.85;
+        const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
+        const weightA = Math.max(0.0, 1.0 - distA / 120.0);
         
-        const landWeight = Math.max(spawnIslandWeight, islandNoiseWeight);
+        const dxB = (vx - 220.0) * 1.1;
+        const dzB = (vz - 20.0) * 0.95;
+        const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
+        const weightB = Math.max(0.0, 1.0 - distB / 100.0);
         
-        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.3);
-        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.6), 1.3);
+        const dxC = (vx - 260.0) * 1.15;
+        const dzC = (vz - (-220.0)) * 0.70;
+        const distC = Math.sqrt(dxC * dxC + dzC * dzC) + eastShoreNoise;
+        const weightC = Math.max(0.0, 1.0 - distC / 150.0);
+        
+        const eastIslandWeight = Math.max(weightA, weightB, weightC);
+        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight);
+        
+        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
+        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.5), 1.2);
         
         const n1 = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.5;
         const n2 = this.noise.noise2d(vx * 0.10, vz * 0.10) * 1.0;
         const baseHeightRaw = 4.0 + n1 + n2;
         
         let hillHeight = 0;
-        if (distFromCenter < 25.0) {
-            const t = 1.0 - distFromCenter / 25.0;
-            hillHeight = 3.5 * Math.pow(t, 1.4);
+        if (distFromAtoll < 22.0) {
+            const t = 1.0 - distFromAtoll / 22.0;
+            hillHeight = Math.max(hillHeight, 11.0 * Math.pow(t, 1.3));
+        }
+        if (distToVolcano < 42.0) {
+            const t = 1.0 - distToVolcano / 42.0;
+            let vHill = 9.0 * Math.pow(t, 1.3);
+            if (distToVolcano < 10.0) {
+                const craterT = 1.0 - distToVolcano / 10.0;
+                vHill -= 4.5 * Math.pow(craterT, 1.5);
+            }
+            hillHeight = Math.max(hillHeight, vHill);
+        }
+        if (vx > 80.0 && eastIslandWeight > 0.0) {
+            const t = Math.pow(eastIslandWeight, 1.3);
+            const hillNoise = this.noise.noise2d(vx * 0.025, vz * 0.025) * 2.5;
+            const eHill = Math.max(0.0, t * 10.0 + hillNoise);
+            hillHeight = Math.max(hillHeight, eHill);
         }
         
         let estimatedY = 0;
