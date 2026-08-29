@@ -254,16 +254,15 @@ function init() {
             textureHeight: 512,
             waterNormals: new THREE.TextureLoader().load('waternormals.jpg', function (texture) {
                 texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-                // Trilinear filtering and mipmapping prevents texture shimmering/vibrating in the distance
                 texture.minFilter = THREE.LinearMipmapLinearFilter;
                 texture.magFilter = THREE.LinearFilter;
                 texture.generateMipmaps = true;
             }),
             sunDirection: sun,
-            sunColor: 0xffaa44, // Golden sunset sun reflections
-            waterColor: 0x004c66, // Warm tropical blue-cyan
-            distortionScale: 1.2, // Low distortion prevents high-frequency pixel vibration
-            alpha: 0.65, // Set vibrant semi-transparent alpha for tropical water depth effect
+            sunColor: 0xffdfaa, // Bright sunlight specular reflections
+            waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
+            distortionScale: 1.5,
+            alpha: 0.82, // Balanced semi-transparent tropical water
             fog: scene.fog !== undefined
         }
     );
@@ -281,87 +280,13 @@ function init() {
         originalOnBeforeRender.call(this, renderer, scene, camera);
     };
 
-    // Define heightmap texture uniform in water material
-    water.material.uniforms['heightmapTexture'] = { value: null };
-
-    // Patch fragment shader to:
-    // 1. Declare heightmapTexture sampler
-    // 2. Flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
-    // 3. Compute dynamic shoreline foam waves that break against any voxel surface
-    water.material.fragmentShader = water.material.fragmentShader.replace(
-        'uniform sampler2D mirrorSampler;',
-        'uniform sampler2D mirrorSampler;\nuniform sampler2D heightmapTexture;'
-    );
-
+    // Flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
         `vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );
          if (eye.y < worldPosition.y) {
              surfaceNormal = -surfaceNormal;
          }`
-    );
-
-    water.material.fragmentShader = water.material.fragmentShader.replace(
-        'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Analytical world-space terrain height and distance calculations (infinite bounds, 0 clipping)
-         // 1. Central Atoll Ring (Radius 114m, Span 66m)
-         float distAtoll = abs(length(worldPosition.xz) - 114.0);
-         float atollLand = max(0.0, 1.0 - distAtoll / 66.0);
-         if (length(worldPosition.xz) < 114.0) {
-             atollLand = max(0.40, atollLand); // Turquoise lagoon interior
-         }
-
-         // 2. Volcano Island (Center 0, 285; Radius 126m, stretched south)
-         vec2 vPos = worldPosition.xz - vec2(0.0, 285.0);
-         if (vPos.y < 0.0) vPos.y *= 0.5;
-         float distVolcano = length(vPos);
-         float volcanoLand = max(0.0, 1.0 - distVolcano / 126.0);
-
-         // 3. Quadrupled Eastern Archipelago
-         vec2 posA = (worldPosition.xz - vec2(750.0, 720.0)) * vec2(1.15, 0.85);
-         float landA = max(0.0, 1.0 - length(posA) / 360.0);
-
-         vec2 posB = (worldPosition.xz - vec2(660.0, 60.0)) * vec2(1.1, 0.95);
-         float landB = max(0.0, 1.0 - length(posB) / 300.0);
-
-         vec2 posC = (worldPosition.xz - vec2(780.0, -660.0)) * vec2(1.15, 0.70);
-         float landC = max(0.0, 1.0 - length(posC) / 450.0);
-
-         float landWeight = max(max(atollLand, volcanoLand), max(max(landA, landB), landC));
-
-         // Shoreline depth: 1.0 = deep ocean (depthVal = 40.0), 0.0 = shore (depthVal = 0.0)
-         float depthVal = max(0.0, (1.0 - landWeight) * 40.0);
-         if (landWeight > 0.52) depthVal = 0.0; // Beach / Island interior
-
-         // Dynamic shoreline foam waves
-         float foamIntensity = 0.0;
-         if (landWeight > 0.35 && landWeight <= 0.55) {
-             float shoreEdge = (landWeight - 0.35) / 0.20;
-             float wave = sin(time * 1.5 - (1.0 - shoreEdge) * 6.0) * 0.5 + 0.5;
-             foamIntensity = smoothstep(0.40, 0.88, shoreEdge * wave) * 0.80;
-             
-             float bubbleNoise = texture2D(normalSampler, worldPosition.xz * 0.15 + time * 0.05).r;
-             foamIntensity += bubbleNoise * 0.25 * smoothstep(0.2, 0.7, shoreEdge);
-             foamIntensity = clamp(foamIntensity, 0.0, 1.0);
-         }
-
-         // Tropical water depth gradient
-         vec3 shallowWaterColor = vec3(0.05, 0.62, 0.75); // Vibrant turquoise shallows
-         vec3 deepWaterColor = vec3(0.01, 0.14, 0.28);    // Rich oceanic navy blue
-         float depthFactor = 1.0 - exp(-0.075 * depthVal);
-         vec3 waterBodyColor = mix(shallowWaterColor, deepWaterColor, depthFactor);
-
-         // Blend surface reflection with water depth body color
-         vec3 surfaceColor = mix(outgoingLight, waterBodyColor, 0.35);
-
-         // Blend white foam waves
-         vec3 finalColor = mix(surfaceColor, vec3(0.95, 0.98, 1.0), foamIntensity);
-
-         // Semi-transparent alpha (0.50 at shallow shore, 0.92 in deep ocean)
-         float depthAlpha = mix(0.50, 0.92, depthFactor);
-         float finalAlpha = mix(depthAlpha, 0.96, foamIntensity);
-
-         gl_FragColor = vec4(finalColor, finalAlpha);`
     );
     
     scene.add(water);
