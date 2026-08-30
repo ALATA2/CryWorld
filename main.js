@@ -245,9 +245,6 @@ function init() {
         if (planetGlobe && planetGlobe.material && planetGlobe.material.uniforms) {
             planetGlobe.material.uniforms['sunDirection'].value.copy(sun).normalize();
         }
-        if (atmosphereGlow && atmosphereGlow.material && atmosphereGlow.material.uniforms) {
-            atmosphereGlow.material.uniforms['sunDirection'].value.copy(sun).normalize();
-        }
     }
     updateSky();
 
@@ -374,54 +371,8 @@ function init() {
     });
     planetGlobe = new THREE.Mesh(planetGeo, planetMat);
     planetGlobe.position.set(0, planetCenterY, 0);
+    planetGlobe.visible = false;
     scene.add(planetGlobe);
-
-    // Atmospheric Glow Halo (surrounds the planetary sphere in space)
-    const atmoGeo = new THREE.SphereGeometry(planetRadius * 1.025, 64, 48);
-    const atmoMat = new THREE.ShaderMaterial({
-        uniforms: {
-            sunDirection: { value: sun },
-            eyePosition: { value: new THREE.Vector3() },
-            opacity: { value: 0.0 }
-        },
-        vertexShader: `
-            varying vec3 vNormal;
-            varying vec3 vWorldPosition;
-            void main() {
-                vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-                vec4 worldPos = modelMatrix * vec4(position, 1.0);
-                vWorldPosition = worldPos.xyz;
-                gl_Position = projectionMatrix * viewMatrix * worldPos;
-            }
-        `,
-        fragmentShader: `
-            varying vec3 vNormal;
-            varying vec3 vWorldPosition;
-            uniform vec3 sunDirection;
-            uniform vec3 eyePosition;
-            uniform float opacity;
-            void main() {
-                vec3 V = normalize(eyePosition - vWorldPosition);
-                vec3 N = normalize(vNormal);
-                vec3 L = normalize(sunDirection);
-                
-                float rim = 1.0 - max(0.0, dot(V, N));
-                float atmoGlow = pow(rim, 3.0);
-                
-                float dayFactor = smoothstep(-0.25, 0.35, dot(N, L));
-                vec3 color = vec3(0.25, 0.65, 1.0) * atmoGlow * (dayFactor * 0.85 + 0.15) * 2.0;
-                
-                gl_FragColor = vec4(color, atmoGlow * (dayFactor * 0.9 + 0.1) * opacity);
-            }
-        `,
-        side: THREE.BackSide,
-        blending: THREE.AdditiveBlending,
-        transparent: true,
-        depthWrite: false
-    });
-    atmosphereGlow = new THREE.Mesh(atmoGeo, atmoMat);
-    atmosphereGlow.position.set(0, planetCenterY, 0);
-    scene.add(atmosphereGlow);
 
     // 6. Marching Cubes Voxel Terrain Setup
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
@@ -1530,12 +1481,14 @@ function animate() {
         // Interpolate exposure from bright noon (1.15) to very dark underwater (0.25)
         renderer.toneMappingExposure = 1.15 - (1.15 - 0.25) * depthFactor;
 
-        if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.38;
+        if (water) {
+            water.visible = true;
+            if (water.material && water.material.uniforms['alpha']) {
+                water.material.uniforms['alpha'].value = 0.38;
+            }
         }
 
         if (planetGlobe) planetGlobe.visible = false;
-        if (atmosphereGlow) atmosphereGlow.visible = false;
     } else {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
@@ -1548,33 +1501,31 @@ function animate() {
         
         renderer.toneMappingExposure = 1.15;
 
-        // Smoothly fade out flat water plane in orbit as planet sphere takes over
-        if (water && water.material && water.material.uniforms['alpha']) {
-            if (altitude > 180.0) {
-                water.material.uniforms['alpha'].value = 0.88 * Math.max(0.0, 1.0 - altFactor);
+        // Smoothly fade out flat water plane in orbit so only the single spherical planet is seen
+        if (water) {
+            if (altitude > 550.0) {
+                water.visible = false;
             } else {
-                water.material.uniforms['alpha'].value = 0.88;
+                water.visible = true;
+                if (water.material && water.material.uniforms['alpha']) {
+                    if (altitude > 180.0) {
+                        water.material.uniforms['alpha'].value = 0.88 * Math.max(0.0, 1.0 - (altitude - 180.0) / 370.0);
+                    } else {
+                        water.material.uniforms['alpha'].value = 0.88;
+                    }
+                }
             }
         }
 
-        // Orbital celestial globe & atmosphere: visible only in the sky / space (altitude > 160m)
+        // Orbital celestial globe: visible in the sky / space (altitude > 160m)
         const isOrbitalView = (altitude > 160.0);
         if (planetGlobe) {
             planetGlobe.visible = isOrbitalView;
             if (isOrbitalView && planetGlobe.material.uniforms) {
-                const globeOpacity = Math.min(1.0, (altitude - 160.0) / 450.0);
+                const globeOpacity = Math.min(1.0, (altitude - 160.0) / 350.0);
                 planetGlobe.material.uniforms['opacity'].value = globeOpacity;
                 planetGlobe.material.uniforms['sunDirection'].value.copy(sun);
                 planetGlobe.material.uniforms['eyePosition'].value.copy(camera.position);
-            }
-        }
-        if (atmosphereGlow) {
-            atmosphereGlow.visible = isOrbitalView;
-            if (isOrbitalView && atmosphereGlow.material.uniforms) {
-                const atmoOpacity = Math.min(1.0, (altitude - 160.0) / 450.0);
-                atmosphereGlow.material.uniforms['opacity'].value = atmoOpacity;
-                atmosphereGlow.material.uniforms['sunDirection'].value.copy(sun);
-                atmosphereGlow.material.uniforms['eyePosition'].value.copy(camera.position);
             }
         }
     }
