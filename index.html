@@ -672,10 +672,13 @@
         <!-- Center Crosshair -->
         <div id="crosshair"></div>
 
-        <!-- Bottom Left Real-time FPS Counter & Altimeter (Active in Flight) -->
+        <!-- Bottom Left Real-time FPS Counter, Version & Altimeter (Active in Flight) -->
         <div class="hud-bottom-left">
             <div class="hud-card fps-card">
                 FPS: <span id="fps-counter">60</span>
+            </div>
+            <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
+                V 0.175
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>
