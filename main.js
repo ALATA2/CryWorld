@@ -9,7 +9,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, planetGlobe, atmosphereGlow, heightmapTexture, heightmapData;
+let terrain, water, sky, sun, heightmapTexture, heightmapData;
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
 let activeSlot = 3;
@@ -238,18 +238,15 @@ function init() {
         // Match fog to clear sky horizon blue
         scene.fog.color.setHex(0x8ce3ff);
         
-        // Dynamically update water and planetary body sunlight direction
+        // Dynamically update water sunlight direction
         if (water) {
             water.material.uniforms['sunDirection'].value.copy(sun).normalize();
-        }
-        if (planetGlobe && planetGlobe.material && planetGlobe.material.uniforms) {
-            planetGlobe.material.uniforms['sunDirection'].value.copy(sun).normalize();
         }
     }
     updateSky();
 
-    // 5. Water Setup (Smooth Circular Ocean disc seamlessly integrated with the planet body)
-    const waterGeometry = new THREE.CircleGeometry(2600, 64);
+    // 5. Infinite Ocean Plane Setup (Seamless tropical ocean in all directions)
+    const waterGeometry = new THREE.PlaneGeometry(16000, 16000);
     water = new Water(
         waterGeometry,
         {
@@ -270,7 +267,7 @@ function init() {
         }
     );
     water.rotation.x = -Math.PI / 2;
-    water.position.y = 120.0; // Sea level at Y = 120.0 meters
+    water.position.set(0, 120.0, 0); // Sea level at Y = 120.0 meters
     
     // Make water double-sided so you can see the surface from underneath and enable blending
     water.material.side = THREE.DoubleSide;
@@ -304,75 +301,6 @@ function init() {
     );
     
     scene.add(water);
-
-    // 5b. Spherical 3D Planetary Celestial Globe & Atmospheric Limb (Orbital Space View)
-    // Radius R = 2200m. Top apex sits at Y = 119.2m (sea level).
-    const planetRadius = 2200.0;
-    const planetCenterY = 119.2 - planetRadius; // Y = -2080.8
-    const planetGeo = new THREE.SphereGeometry(planetRadius, 96, 64);
-    const planetMat = new THREE.ShaderMaterial({
-        uniforms: {
-            sunDirection: { value: sun },
-            eyePosition: { value: new THREE.Vector3() },
-            oceanColor: { value: new THREE.Color(0x013d56) }, // Deep Caribbean ocean
-            opacity: { value: 0.0 }
-        },
-        transparent: true,
-        depthWrite: true,
-        vertexShader: `
-            varying vec3 vWorldPosition;
-            varying vec3 vNormal;
-            void main() {
-                vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-                vec4 worldPos = modelMatrix * vec4(position, 1.0);
-                vWorldPosition = worldPos.xyz;
-                gl_Position = projectionMatrix * viewMatrix * worldPos;
-            }
-        `,
-        fragmentShader: `
-            varying vec3 vWorldPosition;
-            varying vec3 vNormal;
-            uniform vec3 sunDirection;
-            uniform vec3 eyePosition;
-            uniform vec3 oceanColor;
-            uniform float opacity;
-
-            void main() {
-                vec3 N = normalize(vNormal);
-                vec3 L = normalize(sunDirection);
-                vec3 V = normalize(eyePosition - vWorldPosition);
-
-                // Day / Night light terminator
-                float NdotL = dot(N, L);
-                float dayFactor = smoothstep(-0.20, 0.25, NdotL);
-
-                // Base ocean with spherical depth shading
-                vec3 baseColor = mix(oceanColor * 0.12, oceanColor, dayFactor);
-
-                // Specular reflection of the sun on the oceanic sphere (sun glint)
-                vec3 H = normalize(L + V);
-                float NdotH = max(0.0, dot(N, H));
-                float specular = pow(NdotH, 64.0) * dayFactor;
-                vec3 sunGlint = vec3(1.0, 0.96, 0.88) * specular * 1.2;
-
-                // Atmospheric Rayleigh limb glow (Fresnel rim around the silhouette)
-                float rim = 1.0 - max(0.0, dot(V, N));
-                float atmoRim = pow(rim, 3.8);
-                vec3 atmoColor = vec3(0.20, 0.65, 1.0) * atmoRim * (dayFactor * 0.85 + 0.15) * 1.8;
-
-                // Soft inner atmospheric haze
-                float innerHaze = pow(rim, 1.6) * 0.20 * dayFactor;
-                atmoColor += vec3(0.15, 0.55, 0.95) * innerHaze;
-
-                vec3 finalColor = baseColor + sunGlint + atmoColor;
-                gl_FragColor = vec4(finalColor, opacity);
-            }
-        `
-    });
-    planetGlobe = new THREE.Mesh(planetGeo, planetMat);
-    planetGlobe.position.set(0, planetCenterY, 0);
-    planetGlobe.visible = false;
-    scene.add(planetGlobe);
 
     // 6. Marching Cubes Voxel Terrain Setup
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
@@ -1481,53 +1409,30 @@ function animate() {
         // Interpolate exposure from bright noon (1.15) to very dark underwater (0.25)
         renderer.toneMappingExposure = 1.15 - (1.15 - 0.25) * depthFactor;
 
-        if (water) {
-            water.visible = true;
-            if (water.material && water.material.uniforms['alpha']) {
-                water.material.uniforms['alpha'].value = 0.38;
-            }
+        if (water && water.material && water.material.uniforms['alpha']) {
+            water.material.uniforms['alpha'].value = 0.38;
         }
-
-        if (planetGlobe) planetGlobe.visible = false;
     } else {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
         }
         
         scene.fog.color.copy(currentFogColor);
-        // From 1.1km up, the atmosphere thins completely (fog recedes to 45km for razor-sharp view of the planet globe)
+        // From 1.1km up, the atmosphere thins completely (fog recedes to 45km for crystal-clear view of islands and ocean)
         scene.fog.near = 250.0 + (10000.0 - 250.0) * altFactor;
         scene.fog.far = 600.0 + (45000.0 - 600.0) * altFactor;
         
         renderer.toneMappingExposure = 1.15;
 
-        // Smoothly fade out flat water plane in orbit so only the single spherical planet is seen
-        if (water) {
-            if (altitude > 550.0) {
-                water.visible = false;
-            } else {
-                water.visible = true;
-                if (water.material && water.material.uniforms['alpha']) {
-                    if (altitude > 180.0) {
-                        water.material.uniforms['alpha'].value = 0.88 * Math.max(0.0, 1.0 - (altitude - 180.0) / 370.0);
-                    } else {
-                        water.material.uniforms['alpha'].value = 0.88;
-                    }
-                }
-            }
+        if (water && water.material && water.material.uniforms['alpha']) {
+            water.material.uniforms['alpha'].value = 0.82;
         }
+    }
 
-        // Orbital celestial globe: visible in the sky / space (altitude > 160m)
-        const isOrbitalView = (altitude > 160.0);
-        if (planetGlobe) {
-            planetGlobe.visible = isOrbitalView;
-            if (isOrbitalView && planetGlobe.material.uniforms) {
-                const globeOpacity = Math.min(1.0, (altitude - 160.0) / 350.0);
-                planetGlobe.material.uniforms['opacity'].value = globeOpacity;
-                planetGlobe.material.uniforms['sunDirection'].value.copy(sun);
-                planetGlobe.material.uniforms['eyePosition'].value.copy(camera.position);
-            }
-        }
+    // Keep ocean centered on player horizontally so it extends infinitely to the horizon
+    if (water) {
+        water.position.x = camera.position.x;
+        water.position.z = camera.position.z;
     }
 
     // 5c. Active Tool swing/punch animation tick (First Person stabbing/swinging/punching effect)
