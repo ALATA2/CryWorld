@@ -10,6 +10,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 // ==========================================
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun, heightmapTexture, heightmapData;
+const cameraPosUniform = { value: new THREE.Vector3() };
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
 let activeSlot = 3;
@@ -245,8 +246,8 @@ function init() {
     }
     updateSky();
 
-    // 5. Infinite Ocean Plane Setup (Seamless tropical ocean in all directions)
-    const waterGeometry = new THREE.PlaneGeometry(16000, 16000);
+    // 5. Planetary Spherical Ocean Setup (Perfect 360° circular celestial planet body)
+    const waterGeometry = new THREE.CircleGeometry(3200, 160);
     water = new Water(
         waterGeometry,
         {
@@ -262,7 +263,7 @@ function init() {
             sunColor: 0xffdfaa, // Bright sunlight specular reflections
             waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
             distortionScale: 1.5,
-            alpha: 0.82, // Balanced semi-transparent tropical water
+            alpha: 0.85, // Balanced semi-transparent tropical water
             fog: scene.fog !== undefined
         }
     );
@@ -280,6 +281,30 @@ function init() {
         originalOnBeforeRender.call(this, renderer, scene, camera);
     };
 
+    // Planetary Horizon Vertex Curvature for water
+    water.material.uniforms['cameraPos'] = cameraPosUniform;
+    water.material.vertexShader = `
+        uniform vec3 cameraPos;
+    ` + water.material.vertexShader;
+
+    water.material.vertexShader = water.material.vertexShader.replace(
+        'vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );',
+        `vec3 curvedPos = position;
+         vec4 worldV = modelMatrix * vec4(position, 1.0);
+         float distH = length(worldV.xz - cameraPos.xz);
+         float planetR = 2800.0;
+         if (distH < planetR) {
+             float drop = planetR - sqrt(planetR * planetR - distH * distH);
+             curvedPos.z -= drop;
+         } else {
+             curvedPos.z -= planetR;
+         }
+         mirrorCoord = modelMatrix * vec4( curvedPos, 1.0 );
+         worldPosition = mirrorCoord.xyzw;
+         mirrorCoord = textureMatrix * mirrorCoord;
+         vec4 mvPosition = modelViewMatrix * vec4( curvedPos, 1.0 );`
+    );
+
     // Flip normal when looking from below (enables wave shading, specular glints and highlights underwater)
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
@@ -289,15 +314,26 @@ function init() {
          }`
     );
 
-    // Distance-based optical absorption:
-    // Close by: clear and semi-transparent (alpha ~ 0.85)
-    // Distance / deep: smoothly increases opacity to 0.98, obscuring deep and distant underwater terrain
+    // Planetary Atmosphere Limb glow & smooth circular horizon cutoff in fragment shader
+    water.material.fragmentShader = `
+        uniform vec3 cameraPos;
+    ` + water.material.fragmentShader;
+
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
         `float viewDist = length(worldPosition.xyz - eye);
          float distFade = smoothstep(15.0, 120.0, viewDist);
          float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
-         gl_FragColor = vec4( outgoingLight, distAlpha );`
+
+         // Atmospheric Rayleigh limb halo around the planetary spherical horizon
+         float distH = length(worldPosition.xz - cameraPos.xz);
+         float atmoLimb = smoothstep(1600.0, 2750.0, distH);
+         vec3 atmoHalo = vec3(0.20, 0.70, 1.0) * atmoLimb * 1.5;
+         vec3 finalColor = outgoingLight + atmoHalo;
+
+         // Smooth circular horizon cutoff (zero square edges)
+         float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
+         gl_FragColor = vec4( finalColor, distAlpha * horizonAlpha );`
     );
     
     scene.add(water);
@@ -1429,7 +1465,11 @@ function animate() {
         }
     }
 
-    // Keep ocean centered on player horizontally so it extends infinitely to the horizon
+    // Keep ocean centered on player horizontally and update planetary curvature center
+    cameraPosUniform.value.copy(camera.position);
+    if (terrain && terrain.cameraPos) {
+        terrain.cameraPos.copy(camera.position);
+    }
     if (water) {
         water.position.x = camera.position.x;
         water.position.z = camera.position.z;
@@ -1963,13 +2003,46 @@ function spawnEnvironmentObjects(scene, terrain) {
         if (g !== masterRockGeo) g.dispose();
     });
 
-    // Materials
+    // Materials with Planetary Horizon Curvature
+    function applyFoliageCurvature(mat) {
+        mat.onBeforeCompile = (shader) => {
+            shader.uniforms.cameraPos = cameraPosUniform;
+            shader.vertexShader = `
+                uniform vec3 cameraPos;
+            ` + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+                 #ifdef USE_INSTANCING
+                     vec4 worldV = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
+                 #else
+                     vec4 worldV = modelMatrix * vec4(transformed, 1.0);
+                 #endif
+                 float distH = length(worldV.xz - cameraPos.xz);
+                 float planetR = 2800.0;
+                 if (distH < planetR) {
+                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
+                     transformed.y -= drop;
+                 } else {
+                     transformed.y -= planetR;
+                 }`
+            );
+        };
+    }
+
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, flatShading: true, roughness: 0.75, side: THREE.DoubleSide });
     const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: true, roughness: 0.90 });
     const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, flatShading: true, roughness: 0.95 });
     const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
+
+    applyFoliageCurvature(trunkMat);
+    applyFoliageCurvature(leafMat);
+    applyFoliageCurvature(coconutMat);
+    applyFoliageCurvature(pineTrunkMat);
+    applyFoliageCurvature(pineFoliageMat);
+    applyFoliageCurvature(rockMat);
 
     // Initialize/clear global instance arrays
     palmInstances = [];

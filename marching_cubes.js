@@ -426,6 +426,8 @@ export class VoxelTerrain {
         
         this.chunksY = Math.ceil(height / this.chunkSize);
 
+        this.cameraPos = new THREE.Vector3();
+
         // Core terrain material with Vertex Colors and flat low-poly shading
         this.material = new THREE.MeshStandardMaterial({
             vertexColors: true,
@@ -434,6 +436,27 @@ export class VoxelTerrain {
             flatShading: true, // Crucial for low-poly faceted look!
             side: THREE.FrontSide
         });
+
+        // Dynamic Planetary Horizon Curvature (Centered on Camera)
+        this.material.onBeforeCompile = (shader) => {
+            shader.uniforms.cameraPos = { value: this.cameraPos };
+            shader.vertexShader = `
+                uniform vec3 cameraPos;
+            ` + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+                 vec4 worldV = modelMatrix * vec4(transformed, 1.0);
+                 float distH = length(worldV.xz - cameraPos.xz);
+                 float planetR = 2800.0;
+                 if (distH < planetR) {
+                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
+                     transformed.y -= drop;
+                 } else {
+                     transformed.y -= planetR;
+                 }`
+            );
+        };
 
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
