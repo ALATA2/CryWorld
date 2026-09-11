@@ -426,8 +426,6 @@ export class VoxelTerrain {
         
         this.chunksY = Math.ceil(height / this.chunkSize);
 
-        this.cameraPos = new THREE.Vector3();
-
         // Core terrain material with Vertex Colors and flat low-poly shading
         this.material = new THREE.MeshStandardMaterial({
             vertexColors: true,
@@ -436,27 +434,6 @@ export class VoxelTerrain {
             flatShading: true, // Crucial for low-poly faceted look!
             side: THREE.FrontSide
         });
-
-        // Dynamic Planetary Horizon Curvature (Centered on Camera)
-        this.material.onBeforeCompile = (shader) => {
-            shader.uniforms.cameraPos = { value: this.cameraPos };
-            shader.vertexShader = `
-                uniform vec3 cameraPos;
-            ` + shader.vertexShader;
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <begin_vertex>',
-                `#include <begin_vertex>
-                 vec4 worldV = modelMatrix * vec4(transformed, 1.0);
-                 float distH = length(worldV.xz - cameraPos.xz);
-                 float planetR = 2800.0;
-                 if (distH < planetR) {
-                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
-                     transformed.y -= drop;
-                 } else {
-                     transformed.y -= planetR;
-                 }`
-            );
-        };
 
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
@@ -644,7 +621,36 @@ export class VoxelTerrain {
         return density;
     }
 
-    updateChunksAroundPlayer(playerPos, renderDistance = 1000) {
+    hasPotentialTerrain(cx, cy, cz) {
+        if (cy === 0) return true; // Seabed is solid at y = 0
+        
+        const startX = cx * this.chunkSize;
+        const endX = startX + this.chunkSize;
+        const startZ = cz * this.chunkSize;
+        const endZ = startZ + this.chunkSize;
+        const midX = (startX + endX) * 0.5;
+        const midZ = (startZ + endZ) * 0.5;
+
+        // Sample center and corners at sea level
+        if (this.getBaseDensity(midX, 1, midZ) > -0.92) return true;
+        if (this.getBaseDensity(startX, 1, startZ) > -0.92) return true;
+        if (this.getBaseDensity(endX, 1, startZ) > -0.92) return true;
+        if (this.getBaseDensity(startX, 1, endZ) > -0.92) return true;
+        if (this.getBaseDensity(endX, 1, endZ) > -0.92) return true;
+
+        // Check if any modified voxels exist in this chunk
+        if (this.modifiedColumns.size > 0) {
+            for (let x = startX; x <= endX; x += 4) {
+                for (let z = startZ; z <= endZ; z += 4) {
+                    if (this.modifiedColumns.has(`${x},${z}`)) return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    updateChunksAroundPlayer(playerPos, renderDistance = 750, immediateRadius = 180) {
         const now = performance.now();
         if (!this.lastScanPos) {
             this.lastScanPos = new THREE.Vector3(999999, 999999, 999999);
@@ -652,7 +658,7 @@ export class VoxelTerrain {
         }
 
         const distMovedSq = playerPos.distanceToSquared(this.lastScanPos);
-        const shouldRescan = (now - this.lastScanTime > 150) && (distMovedSq > 16.0 || this.lastScanTime === 0);
+        const shouldRescan = (now - this.lastScanTime > 250) && (distMovedSq > 25.0 || this.lastScanTime === 0);
 
         const pvx = Math.floor(playerPos.x / this.voxelScale);
         const pvy = Math.floor(playerPos.y / this.voxelScale);
@@ -668,20 +674,25 @@ export class VoxelTerrain {
             
             const chunkRadius = Math.ceil(renderDistance / (this.chunkSize * this.voxelScale));
             const chunkRadiusSq = chunkRadius * chunkRadius;
+            const immRadiusInChunks = Math.ceil(immediateRadius / (this.chunkSize * this.voxelScale));
+            const immRadiusSq = immRadiusInChunks * immRadiusInChunks;
             
             const activeKeys = new Set();
             
             // Loop through chunks in a cylinder around player
             for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
                 for (let cz = pcz - chunkRadius; cz <= pcz + chunkRadius; cz++) {
-                    // Keep within limits (cx from -229 to 229)
                     if (cx < -229 || cx > 229 || cz < -229 || cz > 229) continue;
                     
                     const dx = cx - pcx;
                     const dz = cz - pcz;
-                    if (dx*dx + dz*dz > chunkRadiusSq) continue;
+                    const distColSq = dx * dx + dz * dz;
+                    if (distColSq > chunkRadiusSq) continue;
                     
                     for (let cy = 0; cy < this.chunksY; cy++) {
+                        // Skip chunks that are pure empty air
+                        if (!this.hasPotentialTerrain(cx, cy, cz)) continue;
+
                         const key = `${cx},${cy},${cz}`;
                         activeKeys.add(key);
                         
@@ -689,7 +700,13 @@ export class VoxelTerrain {
                             const chunk = new VoxelChunk(cx, cy, cz, this);
                             this.loadedChunks.set(key, chunk);
                             this.group.add(chunk.mesh);
-                            this.chunkBuildQueue.push(chunk);
+                            
+                            // If immediately around player, build right now without delay!
+                            if (distColSq <= immRadiusSq) {
+                                chunk.rebuild();
+                            } else {
+                                this.chunkBuildQueue.push(chunk);
+                            }
                         }
                     }
                 }
@@ -719,9 +736,9 @@ export class VoxelTerrain {
             }
         }
 
-        // Frame budget protection: max 6 chunks per frame or max 6.0ms processing time
+        // Process queued chunks with high efficiency
         const startTime = performance.now();
-        const maxBuilds = 6;
+        const maxBuilds = 20;
         let builtCount = 0;
         while (this.chunkBuildQueue.length > 0 && builtCount < maxBuilds) {
             const chunk = this.chunkBuildQueue.shift();
@@ -729,7 +746,7 @@ export class VoxelTerrain {
                 chunk.rebuild();
                 builtCount++;
             }
-            if (performance.now() - startTime > 6.0) break; // Keep frame time strictly under budget!
+            if (performance.now() - startTime > 8.0) break;
         }
     }
 

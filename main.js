@@ -2015,46 +2015,13 @@ function spawnEnvironmentObjects(scene, terrain) {
         if (g !== masterRockGeo) g.dispose();
     });
 
-    // Materials with Planetary Horizon Curvature
-    function applyFoliageCurvature(mat) {
-        mat.onBeforeCompile = (shader) => {
-            shader.uniforms.cameraPos = cameraPosUniform;
-            shader.vertexShader = `
-                uniform vec3 cameraPos;
-            ` + shader.vertexShader;
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <begin_vertex>',
-                `#include <begin_vertex>
-                 #ifdef USE_INSTANCING
-                     vec4 worldV = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
-                 #else
-                     vec4 worldV = modelMatrix * vec4(transformed, 1.0);
-                 #endif
-                 float distH = length(worldV.xz - cameraPos.xz);
-                 float planetR = 2800.0;
-                 if (distH < planetR) {
-                     float drop = planetR - sqrt(planetR * planetR - distH * distH);
-                     transformed.y -= drop;
-                 } else {
-                     transformed.y -= planetR;
-                 }`
-            );
-        };
-    }
-
+    // Materials
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, flatShading: true, roughness: 0.75, side: THREE.DoubleSide });
     const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: true, roughness: 0.90 });
     const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, flatShading: true, roughness: 0.95 });
     const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
-
-    applyFoliageCurvature(trunkMat);
-    applyFoliageCurvature(leafMat);
-    applyFoliageCurvature(coconutMat);
-    applyFoliageCurvature(pineTrunkMat);
-    applyFoliageCurvature(pineFoliageMat);
-    applyFoliageCurvature(rockMat);
 
     // Initialize/clear global instance arrays
     palmInstances = [];
