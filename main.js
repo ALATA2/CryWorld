@@ -346,7 +346,19 @@ function init() {
     const testPos = new THREE.Vector3(startX, 130, startZ);
 
     // Build initial chunks around start position so we can query height
-    terrain.updateChunksAroundPlayer(testPos, 150);
+    terrain.updateChunksAroundPlayer(testPos, 1000);
+
+    // Auto-load custom map from Level Editor if saved in localStorage
+    try {
+        const savedMap = localStorage.getItem('cryworld_custom_map');
+        if (savedMap) {
+            const parsed = JSON.parse(savedMap);
+            terrain.importMapData(parsed);
+            console.log("Custom map from Level Editor loaded successfully!");
+        }
+    } catch (e) {
+        console.warn("Could not load custom map:", e);
+    }
 
     // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
     heightmapData = new Uint8Array(256 * 256);
@@ -1593,7 +1605,7 @@ function animate() {
 
     // 5e. Update active terrain chunks and center sky dome on the player
     if (terrain) {
-        const dynamicRenderDist = Math.min(850.0, 500.0 + altFactor * 350.0); // 500m on ground, 850m in orbit
+        const dynamicRenderDist = Math.min(1250.0, 1000.0 + altFactor * 250.0); // 1000m on ground, 1250m in orbit
         terrain.updateChunksAroundPlayer(camera.position, dynamicRenderDist);
     }
     if (sky) {

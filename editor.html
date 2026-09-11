@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryWorld - 3D Map & Level Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: rgba(10, 18, 30, 0.90);
+            --accent-cyan: #00d2ff;
+            --accent-green: #00e676;
+            --text-main: #f0f6fc;
+            --text-muted: #8b9bb4;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #040911;
+            font-family: 'Outfit', sans-serif;
+            color: var(--text-main);
+        }
+
+        #editor-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Top Navigation Bar */
+        .top-nav {
+            position: absolute;
+            top: 16px;
+            left: 20px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .nav-card {
+            background: var(--bg-dark);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 900;
+            font-size: 1.05rem;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-badge {
+            background: linear-gradient(135deg, #00d2ff, #0077ff);
+            color: #021020;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 5px;
+            text-transform: uppercase;
+        }
+
+        .coord-pill {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--accent-cyan);
+            background: rgba(0, 210, 255, 0.1);
+            border: 1px solid rgba(0, 210, 255, 0.25);
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            padding: 7px 13px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 0.84rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.16s ease;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: var(--accent-cyan);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00b0ff, #0066ff);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 16px rgba(0, 150, 255, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #00c853, #009624);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 16px rgba(0, 200, 83, 0.4);
+        }
+
+        /* Left Tools Palette */
+        .tools-sidebar {
+            position: absolute;
+            left: 20px;
+            top: 76px;
+            z-index: 10;
+            background: var(--bg-dark);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .tool-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            font-size: 1.3rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.16s ease;
+        }
+
+        .tool-btn .hotkey {
+            font-size: 0.60rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            margin-top: -2px;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: var(--accent-cyan);
+            transform: scale(1.04);
+        }
+
+        .tool-btn.active {
+            background: rgba(0, 210, 255, 0.22);
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 16px rgba(0, 210, 255, 0.4);
+        }
+
+        .tool-btn.active .hotkey {
+            color: var(--accent-cyan);
+        }
+
+        /* Brush Properties Panel */
+        .brush-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+            background: var(--bg-dark);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            padding: 14px 18px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .param-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .param-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .param-val {
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .slider {
+            width: 120px;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.15);
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(0, 210, 255, 0.8);
+        }
+
+        .select-input {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: var(--text-main);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: 0.82rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .select-input option {
+            background: #0a121e;
+            color: #ffffff;
+        }
+
+        /* Controls Hints */
+        .hint-bar {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            background: var(--bg-dark);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            padding: 8px 14px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 14px;
+        }
+
+        .hint-bar kbd {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+        }
+
+        #toast {
+            position: absolute;
+            top: 76px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: rgba(0, 230, 118, 0.92);
+            color: #02180c;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: 800;
+            font-size: 0.88rem;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.22s ease;
+            box-shadow: 0 4px 20px rgba(0, 230, 118, 0.5);
+        }
+
+        #toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        #file-input {
+            display: none;
+        }
+    </style>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+</head>
+<body>
+    <canvas id="editor-canvas"></canvas>
+
+    <div class="top-nav">
+        <div class="nav-card">
+            <div class="brand">
+                <span>🏝️ CryWorld</span>
+                <span class="brand-badge">Level Editor</span>
+            </div>
+            <div class="coord-pill" id="cursor-pos">Cursor: X: 0 Y: 120 Z: 0</div>
+            <div class="coord-pill" id="mod-count" style="color: var(--accent-green); background: rgba(0, 230, 118, 0.1); border-color: rgba(0, 230, 118, 0.25);">Mods: 0 voxels</div>
+        </div>
+
+        <div class="nav-card">
+            <button class="btn" id="btn-topdown">📐 Top-Down [T]</button>
+            <button class="btn" id="btn-reset">🔄 Reset</button>
+            <button class="btn" id="btn-import">📂 Import JSON</button>
+            <button class="btn btn-primary" id="btn-export">💾 Export Map</button>
+            <button class="btn btn-success" id="btn-play">🎮 Play Map</button>
+        </div>
+    </div>
+
+    <div class="tools-sidebar">
+        <button class="tool-btn active" data-tool="sculpt" title="Sculpt (Alza / Scava)">
+            <span>⛰️</span>
+            <span class="hotkey">1</span>
+        </button>
+        <button class="tool-btn" data-tool="flatten" title="Flatten Plateau (Livella)">
+            <span>🪨</span>
+            <span class="hotkey">2</span>
+        </button>
+        <button class="tool-btn" data-tool="smooth" title="Smooth (Leviga)">
+            <span>🌊</span>
+            <span class="hotkey">3</span>
+        </button>
+        <button class="tool-btn" data-tool="foliage" title="Paint Vegetation (Alberi & Rocce)">
+            <span>🌴</span>
+            <span class="hotkey">4</span>
+        </button>
+        <button class="tool-btn" data-tool="stamp" title="Stamp Island Preset (Timbro Isola)">
+            <span>🌋</span>
+            <span class="hotkey">5</span>
+        </button>
+        <button class="tool-btn" data-tool="eraser" title="Eraser (Azzera Modifiche)">
+            <span>🗑️</span>
+            <span class="hotkey">6</span>
+        </button>
+    </div>
+
+    <div class="brush-panel">
+        <div class="param-group">
+            <div class="param-header">
+                <span>Radius</span>
+                <span class="param-val" id="val-radius">18m</span>
+            </div>
+            <input type="range" min="3" max="60" value="18" class="slider" id="slider-radius">
+        </div>
+
+        <div class="param-group">
+            <div class="param-header">
+                <span>Strength</span>
+                <span class="param-val" id="val-strength">1.0</span>
+            </div>
+            <input type="range" min="0.1" max="2.5" step="0.1" value="1.0" class="slider" id="slider-strength">
+        </div>
+
+        <div class="param-group" id="group-type" style="display: none;">
+            <div class="param-header"><span id="lbl-type">Type</span></div>
+            <select class="select-input" id="select-type">
+            </select>
+        </div>
+    </div>
+
+    <div class="hint-bar">
+        <span><kbd>Click SX</kbd> Applica Pennello</span>
+        <span><kbd>Shift + Click SX</kbd> Scava / Inverti</span>
+        <span><kbd>Click DX + Drag</kbd> Orbita Vista</span>
+        <span><kbd>W A S D</kbd> Vola</span>
+        <span><kbd>Rotellina</kbd> Zoom / Altezza</span>
+    </div>
+
+    <div id="toast">Mappa salvata con successo!</div>
+    <input type="file" id="file-input" accept=".json">
+
+    <script type="module" src="editor.js"></script>
+</body>
+</html>

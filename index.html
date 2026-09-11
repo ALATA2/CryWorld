@@ -637,11 +637,14 @@
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.176</div>
+        <div id="homepage-version">V 0.177</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
-            <button class="play-btn">CLICCA PER GIOCARE</button>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <button class="play-btn">CLICCA PER GIOCARE</button>
+                <button class="play-btn" onclick="window.location.href='editor.html'" style="background: linear-gradient(135deg, #00b0ff, #0066ff); box-shadow: 0 6px 20px rgba(0, 150, 255, 0.45);">🛠️ LEVEL EDITOR 3D</button>
+            </div>
             <div class="instructions-detail">
                 <strong>COMANDI:</strong>
                 <ul>
@@ -678,7 +681,7 @@
                 FPS: <span id="fps-counter">60</span>
             </div>
             <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
-                V 0.176
+                V 0.177
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>

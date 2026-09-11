@@ -644,7 +644,16 @@ export class VoxelTerrain {
         return density;
     }
 
-    updateChunksAroundPlayer(playerPos, renderDistance = 600) {
+    updateChunksAroundPlayer(playerPos, renderDistance = 1000) {
+        const now = performance.now();
+        if (!this.lastScanPos) {
+            this.lastScanPos = new THREE.Vector3(999999, 999999, 999999);
+            this.lastScanTime = 0;
+        }
+
+        const distMovedSq = playerPos.distanceToSquared(this.lastScanPos);
+        const shouldRescan = (now - this.lastScanTime > 150) && (distMovedSq > 16.0 || this.lastScanTime === 0);
+
         const pvx = Math.floor(playerPos.x / this.voxelScale);
         const pvy = Math.floor(playerPos.y / this.voxelScale);
         const pvz = Math.floor(playerPos.z / this.voxelScale);
@@ -652,70 +661,103 @@ export class VoxelTerrain {
         const pcx = Math.floor(pvx / this.chunkSize);
         const pcy = Math.floor(pvy / this.chunkSize);
         const pcz = Math.floor(pvz / this.chunkSize);
-        
-        const chunkRadius = Math.ceil(renderDistance / (this.chunkSize * this.voxelScale));
-        
-        const activeKeys = new Set();
-        let queueChanged = false;
-        
-        // Loop through chunks in a cylinder around player
-        for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
-            for (let cz = pcz - chunkRadius; cz <= pcz + chunkRadius; cz++) {
-                // Keep within 22km limits (cx from -229 to 229)
-                if (cx < -229 || cx > 229 || cz < -229 || cz > 229) continue;
-                
-                for (let cy = 0; cy < this.chunksY; cy++) {
+
+        if (shouldRescan) {
+            this.lastScanTime = now;
+            this.lastScanPos.copy(playerPos);
+            
+            const chunkRadius = Math.ceil(renderDistance / (this.chunkSize * this.voxelScale));
+            const chunkRadiusSq = chunkRadius * chunkRadius;
+            
+            const activeKeys = new Set();
+            
+            // Loop through chunks in a cylinder around player
+            for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
+                for (let cz = pcz - chunkRadius; cz <= pcz + chunkRadius; cz++) {
+                    // Keep within limits (cx from -229 to 229)
+                    if (cx < -229 || cx > 229 || cz < -229 || cz > 229) continue;
+                    
                     const dx = cx - pcx;
                     const dz = cz - pcz;
-                    if (dx*dx + dz*dz > chunkRadius * chunkRadius) continue;
+                    if (dx*dx + dz*dz > chunkRadiusSq) continue;
                     
-                    const key = `${cx},${cy},${cz}`;
-                    activeKeys.add(key);
-                    
-                    if (!this.loadedChunks.has(key)) {
-                        const chunk = new VoxelChunk(cx, cy, cz, this);
-                        this.loadedChunks.set(key, chunk);
-                        this.group.add(chunk.mesh);
-                        this.chunkBuildQueue.push(chunk);
-                        queueChanged = true;
+                    for (let cy = 0; cy < this.chunksY; cy++) {
+                        const key = `${cx},${cy},${cz}`;
+                        activeKeys.add(key);
+                        
+                        if (!this.loadedChunks.has(key)) {
+                            const chunk = new VoxelChunk(cx, cy, cz, this);
+                            this.loadedChunks.set(key, chunk);
+                            this.group.add(chunk.mesh);
+                            this.chunkBuildQueue.push(chunk);
+                        }
                     }
                 }
             }
-        }
-        
-        // Unload chunks that are too far
-        for (const [key, chunk] of this.loadedChunks.entries()) {
-            if (!activeKeys.has(key)) {
-                this.group.remove(chunk.mesh);
-                chunk.geometry.dispose();
-                this.loadedChunks.delete(key);
-                
-                const idx = this.chunkBuildQueue.indexOf(chunk);
-                if (idx !== -1) {
-                    this.chunkBuildQueue.splice(idx, 1);
-                    queueChanged = true;
+            
+            // Unload chunks that are too far
+            for (const [key, chunk] of this.loadedChunks.entries()) {
+                if (!activeKeys.has(key)) {
+                    this.group.remove(chunk.mesh);
+                    chunk.geometry.dispose();
+                    this.loadedChunks.delete(key);
+                    
+                    const idx = this.chunkBuildQueue.indexOf(chunk);
+                    if (idx !== -1) {
+                        this.chunkBuildQueue.splice(idx, 1);
+                    }
                 }
+            }
+
+            // Sort build queue: build closest chunks first
+            if (this.chunkBuildQueue.length > 0) {
+                this.chunkBuildQueue.sort((a, b) => {
+                    const da = Math.pow(a.cx - pcx, 2) + Math.pow(a.cz - pcz, 2);
+                    const db = Math.pow(b.cx - pcx, 2) + Math.pow(b.cz - pcz, 2);
+                    return da - db;
+                });
             }
         }
 
-        // Sort build queue: build closest chunks first
-        if (this.chunkBuildQueue.length > 0) {
-            this.chunkBuildQueue.sort((a, b) => {
-                const da = Math.pow(a.cx - pcx, 2) + Math.pow(a.cz - pcz, 2);
-                const db = Math.pow(b.cx - pcx, 2) + Math.pow(b.cz - pcz, 2);
-                return da - db;
-            });
-        }
-
-        // Rebuild a max of 32 chunks per frame for instant loading without stutter
-        const buildsPerFrame = 32;
+        // Frame budget protection: max 6 chunks per frame or max 6.0ms processing time
+        const startTime = performance.now();
+        const maxBuilds = 6;
         let builtCount = 0;
-        while (this.chunkBuildQueue.length > 0 && builtCount < buildsPerFrame) {
+        while (this.chunkBuildQueue.length > 0 && builtCount < maxBuilds) {
             const chunk = this.chunkBuildQueue.shift();
-            if (chunk.dirty) {
+            if (chunk && chunk.dirty) {
                 chunk.rebuild();
                 builtCount++;
             }
+            if (performance.now() - startTime > 6.0) break; // Keep frame time strictly under budget!
+        }
+    }
+
+    exportMapData() {
+        return {
+            version: 1,
+            modifiedVoxels: Array.from(this.modifiedVoxels.entries()),
+            modifiedColumns: Array.from(this.modifiedColumns)
+        };
+    }
+
+    importMapData(data) {
+        if (!data) return;
+        this.modifiedVoxels.clear();
+        this.modifiedColumns.clear();
+        if (data.modifiedVoxels) {
+            for (const [key, val] of data.modifiedVoxels) {
+                this.modifiedVoxels.set(key, val);
+            }
+        }
+        if (data.modifiedColumns) {
+            for (const col of data.modifiedColumns) {
+                this.modifiedColumns.add(col);
+            }
+        }
+        for (const chunk of this.loadedChunks.values()) {
+            chunk.dirty = true;
+            this.chunkBuildQueue.push(chunk);
         }
     }
 
