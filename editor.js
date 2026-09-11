@@ -19,9 +19,9 @@ let brushStrength = 1.0;
 let foliageType = "palm"; // palm, pine, rock
 let stampType = "atoll"; // atoll, volcano, mountain
 
-// Camera controls
-let camPos = new THREE.Vector3(0, 220, 480);
-let camYaw = 0, camPitch = -0.35;
+// Camera controls (Positioned directly above the player spawn island at X:0, Z:312)
+let camPos = new THREE.Vector3(0, 260, 480);
+let camYaw = 0, camPitch = -0.52;
 let keys = {};
 let foliageInstances = [];
 let foliageGroup;
@@ -70,6 +70,7 @@ function init() {
     const canvas = document.getElementById("editor-canvas");
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 6000);
     camera.position.copy(camPos);
+    camera.rotation.set(camPitch, camYaw, 0, "YXZ");
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -129,7 +130,7 @@ function init() {
 
     // Voxel Terrain
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
-    terrain.updateChunksAroundPlayer(new THREE.Vector3(0, 120, 0), 1000);
+    terrain.updateChunksAroundPlayer(new THREE.Vector3(0, 130, 312), 1000);
 
     // Auto-load custom map if exists
     try {
@@ -478,13 +479,13 @@ function toggleTopDown() {
     const btn = document.getElementById("btn-topdown");
     if (isTopDown) {
         btn.classList.add("btn-primary");
-        camera.position.set(0, 750, 0);
+        camera.position.set(0, 750, 312);
         camera.rotation.set(-Math.PI / 2, 0, 0);
     } else {
         btn.classList.remove("btn-primary");
-        camera.position.set(0, 220, 480);
+        camera.position.set(0, 260, 480);
         camYaw = 0;
-        camPitch = -0.35;
+        camPitch = -0.52;
     }
 }
 
