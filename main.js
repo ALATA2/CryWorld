@@ -1122,11 +1122,10 @@ function handleTerrainInteraction() {
             const modified = terrain.modifyTerrain(hit.point, manipulatorRadius, mode);
             
             if (modified) {
-                // Instantly rebuild the dirty chunks in this frame
+                // Instantly rebuild the local dirty chunks
                 terrain.update();
-                updateHeightmap();
-                renderer.shadowMap.needsUpdate = true; // Optimize: Request shadow map update on terrain change!
-                checkFoliageFalling(); // Check if any tree/rock lost its support ground!
+                updateHeightmap(hit.point, manipulatorRadius);
+                checkFoliageFalling(hit.point, manipulatorRadius); // Only check nearby trees/rocks!
             }
         }
     }
@@ -2212,15 +2211,29 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedRocks.matrixAutoUpdate = false;
 }
 
-function updateHeightmap() {
+function updateHeightmap(nearPos, radius) {
     if (!terrain) return;
     const width = 256;
     const height = 64;
     const depth = 256;
     const scale = 3.0; // voxelScale
+
+    let minX = 0, maxX = width - 1;
+    let minZ = 0, maxZ = depth - 1;
+
+    // Fast path: if modifying locally, only update the small touched window (10x10 instead of 65,536 iterations!)
+    if (nearPos && radius) {
+        const rVox = Math.ceil((radius + 6.0) / scale);
+        const cvx = Math.round(nearPos.x / scale);
+        const cvz = Math.round(nearPos.z / scale);
+        minX = Math.max(0, cvx - rVox + 128);
+        maxX = Math.min(width - 1, cvx + rVox + 128);
+        minZ = Math.max(0, cvz - rVox + 128);
+        maxZ = Math.min(depth - 1, cvz + rVox + 128);
+    }
     
-    for (let x = 0; x < width; x++) {
-        for (let z = 0; z < depth; z++) {
+    for (let x = minX; x <= maxX; x++) {
+        for (let z = minZ; z <= maxZ; z++) {
             // Map x [0, 255] to vx [-128, 127] centered at world (0,0)
             const vx = x - 128;
             const vz = z - 128;
@@ -2267,13 +2280,19 @@ function updateHeightmap() {
     }
 }
 
-function checkFoliageFalling() {
+function checkFoliageFalling(nearPos, radius = 6.0) {
     if (!terrain) return;
+    const checkRadiusSq = (radius + 8.0) * (radius + 8.0);
     
     // Check palms
     for (let i = 0; i < palmInstances.length; i++) {
         const inst = palmInstances[i];
         if (inst.falling) continue;
+        if (nearPos) {
+            const dx = inst.x - nearPos.x;
+            const dz = inst.z - nearPos.z;
+            if (dx * dx + dz * dz > checkRadiusSq) continue;
+        }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
         const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
         const targetY = groundHeight - 0.1;
@@ -2287,6 +2306,11 @@ function checkFoliageFalling() {
     for (let i = 0; i < pineInstances.length; i++) {
         const inst = pineInstances[i];
         if (inst.falling) continue;
+        if (nearPos) {
+            const dx = inst.x - nearPos.x;
+            const dz = inst.z - nearPos.z;
+            if (dx * dx + dz * dz > checkRadiusSq) continue;
+        }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
         const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
         const targetY = groundHeight - 0.15;
@@ -2300,6 +2324,11 @@ function checkFoliageFalling() {
     for (let i = 0; i < rockInstances.length; i++) {
         const inst = rockInstances[i];
         if (inst.falling) continue;
+        if (nearPos) {
+            const dx = inst.x - nearPos.x;
+            const dz = inst.z - nearPos.z;
+            if (dx * dx + dz * dz > checkRadiusSq) continue;
+        }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
         const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
         const targetY = groundHeight - 0.25;
