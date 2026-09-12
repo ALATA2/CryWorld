@@ -619,52 +619,26 @@ export class VoxelTerrain {
         if (y >= 40) {
             const finalHeight = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
             density = finalHeight - (y - 32);
+        } else if (y > 0) {
+            // Natural bathymetry from sea level (y = 40) down to natural seabed (y = 0, 120m depth)
+            const blend = y / 40.0;
+            const mask = blend * smoothWeightAbove + (1.0 - blend) * smoothWeightBelow;
+            const finalHeight = baseHeightRaw * mask + hillHeight * mask;
+            density = finalHeight - (y * 0.2);
         } else {
-            // Underwater bathymetry down to 512m depth (y = -131, world Y = -393m)
-            // Distance from nearest island coastline edge
-            const distAtollEdge = Math.max(0.0, distFromAtoll - 22.0);
-            const distVolcanoEdge = Math.max(0.0, distToVolcano - 42.0);
-            const distEastEdge = Math.max(0.0, Math.min(distA - 120.0, Math.min(distB - 100.0, distC - 150.0)));
-            const distToCoast = Math.min(distAtollEdge, Math.min(distVolcanoEdge, distEastEdge));
-
-            // Coastal shelf apron spreading across 160 voxels (480 meters) to ensure soft, natural slope
-            const coastBlend = Math.max(0.0, Math.min(1.0, 1.0 - distToCoast / 160.0));
-            // Smooth hermite S-curve (zero derivative at seabed, smooth slope at coast)
-            const smoothCoast = coastBlend * coastBlend * (3.0 - 2.0 * coastBlend);
-
-            // Target seabed height at this column
-            const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
-            const coastTargetY = Math.max(40.0, finalHeightAbove + 32.0);
-            const seabedFloorY = -131.0;
-            const targetSeabedY = seabedFloorY + (coastTargetY - seabedFloorY) * smoothCoast;
-
-            // Density with gentle gradient for smooth marching cubes
-            density = (targetSeabedY - y) * 0.18;
-
-            // Atoll inner lagoon: keep shallow protected floor inside the atoll (6-15m depth)
-            if (distFromCenter < 38.0) {
-                const lagoonFloorY = 36.0 + baseHeightRaw * 0.25;
-                if (y < lagoonFloorY) {
-                    density = Math.max(density, (lagoonFloorY - y) * 0.25);
-                }
-            }
+            // Solid bedrock from natural seabed (y = 0) down to 512m maximum diggable depth (y = -131, -393m)
+            density = 1.0;
         }
         
         // Add 3D bumpy noise for organic detail
-        if (y >= 40) {
-            const noiseY = (y - 32);
-            const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
-            if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
-                const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
-                density += bumpyNoise;
-            }
-        } else {
-            // Underwater organic reef & canyon noise
-            const underwaterNoise = this.noise.noise3d(x * 0.05, y * 0.05, z * 0.05) * 1.6;
-            density += underwaterNoise;
+        const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
+        const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+        if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
+            const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
+            density += bumpyNoise;
         }
         
-        // Keep ocean floor flat and solid at y <= -131 (512m depth)
+        // Keep ocean bedrock floor solid at y <= -131 (512m depth)
         if (y <= -131) {
             density = Math.max(density, 1.0);
         }

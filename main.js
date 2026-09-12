@@ -342,7 +342,7 @@ function init() {
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
 
     const startX = 0;
-    const startZ = 312; // Rim of the volcano island at Z = 95 voxels (285m) + 27m offset
+    const startZ = 280; // Grassy plateau of the volcano island (altitude ~125.2m, dry land)
     const testPos = new THREE.Vector3(startX, 130, startZ);
 
     // Build initial chunks around start position so we can query height
@@ -455,9 +455,9 @@ function init() {
         gameStarted = false;
         blocker.style.display = 'flex'; // go back to homepage
         
-        // Reset player coordinates to start beach position
-        const resetPos = new THREE.Vector3(startX, 20, startZ);
-        const resetY = terrain.getSurfaceHeight(resetPos, 256.0);
+        // Reset player coordinates to start island position
+        const resetPos = new THREE.Vector3(startX, 130, startZ);
+        const resetY = terrain.getSurfaceHeight(resetPos, 192.0);
         camera.position.set(startX, resetY + playerHeight, startZ);
         velocity.set(0, 0, 0);
     });
