@@ -918,8 +918,8 @@ export class VoxelTerrain {
 
     // Cylinder / capsule collision tester: checks if a player-sized cylinder at (x, y, z) touches solid terrain
     isCylinderColliding(x, y, z, radius = 0.45, height = 1.8) {
-        // Sample at 3 heights along the player's body: chest, waist, and lower body
-        const yLevels = [y - 0.35, y - 0.85, y - 1.35];
+        // Sample at 3 heights along the player's body: chest, waist, and lower torso (above step height)
+        const yLevels = [y - 0.35, y - 0.75, y - 1.15];
         const r = radius;
         const rDiag = radius * 0.7071;
 
