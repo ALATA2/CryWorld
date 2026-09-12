@@ -111,6 +111,7 @@ const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
 const _barrenColor = new THREE.Color(0x948366); // Dry, barren dirt/scrub for eastern islands
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
 const _seabedColor = new THREE.Color(0x086b7c); // Rich tropical turquoise-blue seabed reef
+const _abyssRockColor = new THREE.Color(0x0c1b26); // Deep abyssal ocean basalt rock
 
 const _vlist = Array.from({ length: 12 }, () => new THREE.Vector3());
 const _p0 = new THREE.Vector3();
@@ -177,6 +178,11 @@ function getColorAt(worldX, worldY, worldZ, normal, target) {
                 // Seabed: fast transition from shoreline sand into deep coral turquoise / ocean reef
                 const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
                 target.lerpColors(sand, _seabedColor, depthFactor);
+                // Further down (into deep ocean and abyss), transition from turquoise reef to deep ocean basalt rock
+                if (worldY < 100.0) {
+                    const abyssFactor = Math.min(Math.max((100.0 - worldY) / 250.0, 0.0), 1.0);
+                    target.lerp(_abyssRockColor, abyssFactor * 0.75);
+                }
             } else {
                 target.copy(sand);
             }
@@ -427,7 +433,17 @@ export class VoxelTerrain {
         this.voxelScale = voxelScale;
         this.chunkSize = 16;
         
-        this.chunksY = Math.ceil(height / this.chunkSize);
+        // Vertical voxel range:
+        // Sea level is at y = 40 (world Y = 120.0m).
+        // 512m deep ocean floor reaches world Y = 120.0 - 512.0 = -392.0m (voxel y = -131).
+        // Island summits reach up to world Y = 192.0m (voxel y = 64).
+        this.minY = -131;
+        this.maxY = 64;
+        this.minWorldY = this.minY * this.voxelScale; // -393.0m
+        this.maxWorldY = this.maxY * this.voxelScale; // 192.0m
+        this.minChunkY = Math.floor(this.minY / this.chunkSize); // -9
+        this.maxChunkY = Math.ceil(this.maxY / this.chunkSize);  // 4
+        this.chunksY = this.maxChunkY - this.minChunkY;
 
         // Core terrain material with Vertex Colors and flat low-poly shading
         this.material = new THREE.MeshStandardMaterial({
@@ -459,7 +475,7 @@ export class VoxelTerrain {
 
     getDensity(x, y, z) {
         // Out of bounds voxels are empty air
-        if (y < 0 || y >= this.height) {
+        if (y < this.minY || y >= this.maxY) {
             return -1.0;
         }
         if (x < -3666 || x > 3666 || z < -3666 || z > 3666) {
@@ -474,7 +490,7 @@ export class VoxelTerrain {
     }
 
     setDensity(x, y, z, value) {
-        if (y < 0 || y >= this.height) return;
+        if (y < this.minY || y >= this.maxY) return;
         if (x < -3666 || x > 3666 || z < -3666 || z > 3666) return;
         
         const key = `${x},${y},${z}`;
@@ -604,30 +620,60 @@ export class VoxelTerrain {
             const finalHeight = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
             density = finalHeight - (y - 32);
         } else {
-            const blend = y / 40.0;
-            const mask = blend * smoothWeightAbove + (1.0 - blend) * smoothWeightBelow;
-            const finalHeight = baseHeightRaw * mask + hillHeight * mask;
-            density = finalHeight - (y * 0.2);
+            // Underwater bathymetry down to 512m depth (y = -131, world Y = -393m)
+            // Distance from nearest island coastline edge
+            const distAtollEdge = Math.max(0.0, distFromAtoll - 22.0);
+            const distVolcanoEdge = Math.max(0.0, distToVolcano - 42.0);
+            const distEastEdge = Math.max(0.0, Math.min(distA - 120.0, Math.min(distB - 100.0, distC - 150.0)));
+            const distToCoast = Math.min(distAtollEdge, Math.min(distVolcanoEdge, distEastEdge));
+
+            // Coastal shelf apron spreading across 160 voxels (480 meters) to ensure soft, natural slope
+            const coastBlend = Math.max(0.0, Math.min(1.0, 1.0 - distToCoast / 160.0));
+            // Smooth hermite S-curve (zero derivative at seabed, smooth slope at coast)
+            const smoothCoast = coastBlend * coastBlend * (3.0 - 2.0 * coastBlend);
+
+            // Target seabed height at this column
+            const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+            const coastTargetY = Math.max(40.0, finalHeightAbove + 32.0);
+            const seabedFloorY = -131.0;
+            const targetSeabedY = seabedFloorY + (coastTargetY - seabedFloorY) * smoothCoast;
+
+            // Density with gentle gradient for smooth marching cubes
+            density = (targetSeabedY - y) * 0.18;
+
+            // Atoll inner lagoon: keep shallow protected floor inside the atoll (6-15m depth)
+            if (distFromCenter < 38.0) {
+                const lagoonFloorY = 36.0 + baseHeightRaw * 0.25;
+                if (y < lagoonFloorY) {
+                    density = Math.max(density, (lagoonFloorY - y) * 0.25);
+                }
+            }
         }
         
         // Add 3D bumpy noise for organic detail
-        const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
-        const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
-        if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
-            const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
-            density += bumpyNoise;
+        if (y >= 40) {
+            const noiseY = (y - 32);
+            const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+            if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
+                const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
+                density += bumpyNoise;
+            }
+        } else {
+            // Underwater organic reef & canyon noise
+            const underwaterNoise = this.noise.noise3d(x * 0.05, y * 0.05, z * 0.05) * 1.6;
+            density += underwaterNoise;
         }
         
-        // Keep ocean floor flat and solid at y === 0
-        if (y === 0) {
-            density = 1.0;
+        // Keep ocean floor flat and solid at y <= -131 (512m depth)
+        if (y <= -131) {
+            density = Math.max(density, 1.0);
         }
         
         return density;
     }
 
     hasPotentialTerrain(cx, cy, cz) {
-        if (cy === 0) return true; // Seabed is solid at y = 0
+        if (cy === this.minChunkY) return true; // Seabed floor is solid at minChunkY
         
         const startX = cx * this.chunkSize;
         const endX = startX + this.chunkSize;
@@ -636,12 +682,17 @@ export class VoxelTerrain {
         const midX = (startX + endX) * 0.5;
         const midZ = (startZ + endZ) * 0.5;
 
-        // Sample center and corners at sea level
-        if (this.getBaseDensity(midX, 1, midZ) > -0.92) return true;
-        if (this.getBaseDensity(startX, 1, startZ) > -0.92) return true;
-        if (this.getBaseDensity(endX, 1, startZ) > -0.92) return true;
-        if (this.getBaseDensity(startX, 1, endZ) > -0.92) return true;
-        if (this.getBaseDensity(endX, 1, endZ) > -0.92) return true;
+        // Sample at chunk bottom, middle and top Y
+        const yBottom = cy * this.chunkSize;
+        const yTop = yBottom + this.chunkSize;
+        const yMid = yBottom + this.chunkSize * 0.5;
+
+        if (this.getBaseDensity(midX, yMid, midZ) > -0.92) return true;
+        if (this.getBaseDensity(startX, yBottom, startZ) > -0.92) return true;
+        if (this.getBaseDensity(endX, yBottom, startZ) > -0.92) return true;
+        if (this.getBaseDensity(startX, yBottom, endZ) > -0.92) return true;
+        if (this.getBaseDensity(endX, yBottom, endZ) > -0.92) return true;
+        if (this.getBaseDensity(midX, yTop, midZ) > -0.92) return true;
 
         // Check if any modified voxels exist in this chunk
         if (this.modifiedColumns.size > 0) {
@@ -694,7 +745,7 @@ export class VoxelTerrain {
                     const distColSq = dx * dx + dz * dz;
                     if (distColSq > chunkRadiusSq) continue;
                     
-                    for (let cy = 0; cy < this.chunksY; cy++) {
+                    for (let cy = this.minChunkY; cy < this.maxChunkY; cy++) {
                         // Skip chunks that are pure empty air
                         if (!this.hasPotentialTerrain(cx, cy, cz)) continue;
 
@@ -809,8 +860,8 @@ export class VoxelTerrain {
 
         const xMin = Math.max(-3666, vx - rVox);
         const xMax = Math.min(3666, vx + rVox);
-        const yMin = Math.max(1, vy - rVox); // Prevent digging the ocean floor level (y=0)
-        const yMax = Math.min(this.height - 1, vy + rVox);
+        const yMin = Math.max(this.minY + 1, vy - rVox); // Prevent digging below the ocean floor level
+        const yMax = Math.min(this.maxY - 1, vy + rVox);
         const zMin = Math.max(-3666, vz - rVox);
         const zMax = Math.min(3666, vz + rVox);
 
@@ -846,16 +897,18 @@ export class VoxelTerrain {
         return modified;
     }
 
-    // Physics helper: sample density at any continuous position to determine if solid
-    isPositionSolid(worldPosition) {
-        const localPos = worldPosition.clone().divideScalar(this.voxelScale);
+    // Physics helper: sample density at raw world coordinate without Vector3 allocation
+    isPointSolid(wx, wy, wz) {
+        const lx = wx / this.voxelScale;
+        const ly = wy / this.voxelScale;
+        const lz = wz / this.voxelScale;
         
-        const fx = Math.floor(localPos.x);
-        const fy = Math.floor(localPos.y);
-        const fz = Math.floor(localPos.z);
+        const fx = Math.floor(lx);
+        const fy = Math.floor(ly);
+        const fz = Math.floor(lz);
 
-        if (fy < 0 || fy >= this.height - 1 || fx < -3666 || fx >= 3666 || fz < -3666 || fz >= 3666) {
-            return worldPosition.y <= 0;
+        if (fy < this.minY || fy >= this.maxY - 1 || fx < -3666 || fx >= 3666 || fz < -3666 || fz >= 3666) {
+            return wy <= this.minWorldY;
         }
 
         // Trilinearly interpolate density values to check if point is solid (density > 0)
@@ -868,11 +921,10 @@ export class VoxelTerrain {
         const d011 = this.getDensity(fx,     fy + 1, fz + 1);
         const d111 = this.getDensity(fx + 1, fy + 1, fz + 1);
 
-        const tx = localPos.x - fx;
-        const ty = localPos.y - fy;
-        const tz = localPos.z - fz;
+        const tx = lx - fx;
+        const ty = ly - fy;
+        const tz = lz - fz;
 
-        // Trilinear interpolation interpolation
         const d00 = d000 * (1 - tx) + d100 * tx;
         const d10 = d010 * (1 - tx) + d110 * tx;
         const d01 = d001 * (1 - tx) + d101 * tx;
@@ -882,8 +934,37 @@ export class VoxelTerrain {
         const d1 = d01 * (1 - ty) + d11 * ty;
 
         const density = d0 * (1 - tz) + d1 * tz;
-
         return density >= 0.0;
+    }
+
+    // Physics helper: sample density at any continuous Vector3 position
+    isPositionSolid(worldPosition) {
+        return this.isPointSolid(worldPosition.x, worldPosition.y, worldPosition.z);
+    }
+
+    // Cylinder / capsule collision tester: checks if a player-sized cylinder at (x, y, z) touches solid terrain
+    isCylinderColliding(x, y, z, radius = 0.45, height = 1.8) {
+        // Sample at 3 heights along the player's body: chest, waist, and lower body
+        const yLevels = [y - 0.35, y - 0.85, y - 1.35];
+        const r = radius;
+        const rDiag = radius * 0.7071;
+
+        for (let l = 0; l < 3; l++) {
+            const py = yLevels[l];
+            // Center
+            if (this.isPointSolid(x, py, z)) return true;
+            // 4 Cardinal perimeter points
+            if (this.isPointSolid(x + r, py, z)) return true;
+            if (this.isPointSolid(x - r, py, z)) return true;
+            if (this.isPointSolid(x, py, z + r)) return true;
+            if (this.isPointSolid(x, py, z - r)) return true;
+            // 4 Diagonal perimeter points
+            if (this.isPointSolid(x + rDiag, py, z + rDiag)) return true;
+            if (this.isPointSolid(x - rDiag, py, z + rDiag)) return true;
+            if (this.isPointSolid(x + rDiag, py, z - rDiag)) return true;
+            if (this.isPointSolid(x - rDiag, py, z - rDiag)) return true;
+        }
+        return false;
     }
 
     // Walk height solver: returns the exact surface height Y under a world coordinate
@@ -895,7 +976,7 @@ export class VoxelTerrain {
         const step = 2.0;
         let lastAirY = wasAir ? testPos.y : null;
 
-        while (testPos.y > 0) {
+        while (testPos.y > this.minWorldY) {
             testPos.y -= step;
             const isSolid = this.isPositionSolid(testPos);
             if (!isSolid) {
@@ -917,7 +998,7 @@ export class VoxelTerrain {
                 return low;
             }
         }
-        return 0; // Water level base Y
+        return this.minWorldY; // Ocean floor base Y (-393.0m)
     }
 
     // Ceiling height solver: returns the ceiling surface Y above world coordinate, or Infinity if open air
@@ -1024,11 +1105,16 @@ export class VoxelTerrain {
         if (yAbove >= 40.0) {
             estimatedY = yAbove;
         } else {
-            estimatedY = 5.0 * (baseHeightRaw + hillHeight) * smoothWeightBelow;
-            if (estimatedY > 40.0) estimatedY = 40.0;
+            const distAtollEdge = Math.max(0.0, distFromAtoll - 22.0);
+            const distVolcanoEdge = Math.max(0.0, distToVolcano - 42.0);
+            const distEastEdge = Math.max(0.0, Math.min(distA - 120.0, Math.min(distB - 100.0, distC - 150.0)));
+            const distToCoast = Math.min(distAtollEdge, Math.min(distVolcanoEdge, distEastEdge));
+            const coastBlend = Math.max(0.0, Math.min(1.0, 1.0 - distToCoast / 160.0));
+            const smoothCoast = coastBlend * coastBlend * (3.0 - 2.0 * coastBlend);
+            estimatedY = -131.0 + (40.0 - (-131.0)) * smoothCoast;
         }
         
-        return Math.max(0.0, Math.floor(estimatedY));
+        return Math.floor(estimatedY);
     }
 }
 

@@ -1274,26 +1274,31 @@ function animate() {
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
 
-        // Horizontal cave wall collision (prevents walking through or clipping into walls)
+        // Horizontal cave wall collision: axis-separated cylinder collision with smooth wall sliding
         if (!isFlying) {
-            const checkPos = new THREE.Vector3(camera.position.x, camera.position.y - playerHeight * 0.5, camera.position.z);
-            if (terrain.isPositionSolid(checkPos)) {
-                // Try sliding along X only
-                checkPos.set(camera.position.x, camera.position.y - playerHeight * 0.5, prevZ);
-                if (!terrain.isPositionSolid(checkPos)) {
-                    camera.position.z = prevZ;
-                } else {
-                    // Try sliding along Z only
-                    checkPos.set(prevX, camera.position.y - playerHeight * 0.5, camera.position.z);
-                    if (!terrain.isPositionSolid(checkPos)) {
-                        camera.position.x = prevX;
-                    } else {
-                        // Completely blocked horizontally
-                        camera.position.x = prevX;
-                        camera.position.z = prevZ;
-                    }
-                }
+            const playerRadius = 0.45;
+            const eyeY = camera.position.y;
+            const newX = camera.position.x;
+            const newZ = camera.position.z;
+
+            // 1. Try moving along X alone from prevX
+            let resolvedX = prevX;
+            if (!terrain.isCylinderColliding(newX, eyeY, prevZ, playerRadius, playerHeight)) {
+                resolvedX = newX;
+            } else {
+                velocity.x = 0; // Wall hit on X
             }
+
+            // 2. Try moving along Z alone from prevZ using the resolved X
+            let resolvedZ = prevZ;
+            if (!terrain.isCylinderColliding(resolvedX, eyeY, newZ, playerRadius, playerHeight)) {
+                resolvedZ = newZ;
+            } else {
+                velocity.z = 0; // Wall hit on Z
+            }
+
+            camera.position.x = resolvedX;
+            camera.position.z = resolvedZ;
         }
 
         // Player collision with palm and pine tree trunks (sliding cylinder response)
@@ -1391,9 +1396,10 @@ function animate() {
                 isGrounded = false;
             }
 
-            // Prevent falling below the water floor level
-            if (camera.position.y - playerHeight < 0.5) {
-                camera.position.y = 0.5 + playerHeight;
+            // Prevent falling below the deep ocean floor level (512m below sea level 120.0m)
+            const seabedFloorLimit = -392.0;
+            if (camera.position.y - playerHeight < seabedFloorLimit) {
+                camera.position.y = seabedFloorLimit + playerHeight;
                 velocity.y = 0;
                 isGrounded = true;
             }
@@ -1438,7 +1444,7 @@ function animate() {
     // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects, or high up to trigger space orbit effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
     const isLookingFromBelow = (camera.position.y < 120.0);
-    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 70.0, 0.0), 1.0);
+    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 512.0, 0.0), 1.0);
     
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
