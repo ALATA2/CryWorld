@@ -231,7 +231,7 @@ class VoxelChunk {
         const size = terrain.chunkSize + 1;
         this.densities = new Float32Array(size * size * size);
         this.initialized = false;
-        this.dirty = false;
+        this.dirty = true;
     }
 
     initializeDensities() {
