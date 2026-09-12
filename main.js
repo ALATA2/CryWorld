@@ -1158,10 +1158,10 @@ function animate() {
     }
 
     if (isFlying) {
-        const altMeters = Math.max(0, Math.round(camera.position.y - 120.0));
+        const altMeters = Math.round(camera.position.y - 120.0);
         const altCounter = document.getElementById('alt-counter');
         if (altCounter) {
-            if (altMeters >= 1000) {
+            if (Math.abs(altMeters) >= 1000) {
                 altCounter.textContent = `${(altMeters / 1000).toFixed(2)} km`;
             } else {
                 altCounter.textContent = `${altMeters} m`;
