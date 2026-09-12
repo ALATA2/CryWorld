@@ -1261,6 +1261,9 @@ function animate() {
             }
         }
 
+        const prevX = camera.position.x;
+        const prevZ = camera.position.z;
+
         // Apply movement vector horizontally (fixed A/D inversion)
         controls.moveRight(velocity.x * delta);
         controls.moveForward(-velocity.z * delta);
@@ -1270,6 +1273,28 @@ function animate() {
         const boundZ = 4800;
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
+
+        // Horizontal cave wall collision (prevents walking through or clipping into walls)
+        if (!isFlying) {
+            const checkPos = new THREE.Vector3(camera.position.x, camera.position.y - playerHeight * 0.5, camera.position.z);
+            if (terrain.isPositionSolid(checkPos)) {
+                // Try sliding along X only
+                checkPos.set(camera.position.x, camera.position.y - playerHeight * 0.5, prevZ);
+                if (!terrain.isPositionSolid(checkPos)) {
+                    camera.position.z = prevZ;
+                } else {
+                    // Try sliding along Z only
+                    checkPos.set(prevX, camera.position.y - playerHeight * 0.5, camera.position.z);
+                    if (!terrain.isPositionSolid(checkPos)) {
+                        camera.position.x = prevX;
+                    } else {
+                        // Completely blocked horizontally
+                        camera.position.x = prevX;
+                        camera.position.z = prevZ;
+                    }
+                }
+            }
+        }
 
         // Player collision with palm and pine tree trunks (sliding cylinder response)
         const playerRadius = 0.5;
@@ -1323,43 +1348,55 @@ function animate() {
         // Apply vertical velocity (gravity & jump)
         camera.position.y += velocity.y * delta;
 
-        // Get ground level Y under player position
-        // Search downwards starting from slightly above player Y position
-        const groundHeight = terrain.getSurfaceHeight(camera.position, camera.position.y + 1.0);
+        if (!isFlying) {
+            const headOffset = 0.25; // Head clearance above eye level
 
-        // Ceiling collision check: if player head goes inside solid terrain
-        const headPos = camera.position.clone();
-        headPos.y += 0.3; // Check 0.3m above camera eye level
-        if (terrain.isPositionSolid(headPos)) {
-            // Player hit head: push down slightly and halt upward velocity
-            if (velocity.y > 0) {
-                velocity.y = 0;
-                camera.position.y = terrain.getSurfaceHeight(camera.position, camera.position.y) - 0.3;
+            // 1. Ceiling collision check: if player touches or penetrates a solid ceiling
+            const ceilingY = terrain.getCeilingHeight(camera.position, 2.5);
+            if (ceilingY !== Infinity && (camera.position.y + headOffset) >= ceilingY) {
+                // Stop upward motion immediately (player bumps head)
+                if (velocity.y > 0) {
+                    velocity.y = 0;
+                }
+                // Clamp camera Y so head stays below ceiling without clipping or teleporting
+                camera.position.y = Math.min(camera.position.y, ceilingY - headOffset);
             }
-        }
 
-        // Floor collision check
-        if (camera.position.y - playerHeight <= groundHeight) {
-            const targetY = groundHeight + playerHeight;
-            const diff = targetY - camera.position.y;
-            // If the difference is large (falling from high up, or digging under feet), snap instantly.
-            // Otherwise, interpolate Y smoothly over time to eliminate marching cubes staircase jitter.
-            if (Math.abs(diff) > 0.4) {
-                camera.position.y = targetY;
+            // 2. Floor collision check: search downwards from inside the player's current air pocket
+            const searchStartY = camera.position.y - 0.3;
+            const groundHeight = terrain.getSurfaceHeight(camera.position, searchStartY);
+
+            if (camera.position.y - playerHeight <= groundHeight) {
+                const targetY = groundHeight + playerHeight;
+                const diff = targetY - camera.position.y;
+                
+                // Never let floor resolution push the player's head into or above the ceiling
+                const maxAllowedY = (ceilingY !== Infinity) ? (ceilingY - headOffset) : Infinity;
+                const clampedTargetY = Math.min(targetY, maxAllowedY);
+
+                // Only step up if difference is within a reasonable step height (<= 0.5m)
+                // Larger diffs represent steep vertical cliffs or cave walls where snapping up is invalid
+                if (diff <= 0.5) {
+                    if (Math.abs(clampedTargetY - camera.position.y) > 0.4) {
+                        camera.position.y = clampedTargetY;
+                    } else {
+                        camera.position.y += (clampedTargetY - camera.position.y) * 25.0 * delta;
+                    }
+                    velocity.y = 0;
+                    isGrounded = true;
+                } else {
+                    isGrounded = false;
+                }
             } else {
-                camera.position.y += diff * 25.0 * delta;
+                isGrounded = false;
             }
-            velocity.y = 0;
-            isGrounded = true;
-        } else {
-            isGrounded = false;
-        }
 
-        // Prevent falling below the water floor level
-        if (camera.position.y - playerHeight < 0.5) {
-            camera.position.y = 0.5 + playerHeight;
-            velocity.y = 0;
-            isGrounded = true;
+            // Prevent falling below the water floor level
+            if (camera.position.y - playerHeight < 0.5) {
+                camera.position.y = 0.5 + playerHeight;
+                velocity.y = 0;
+                isGrounded = true;
+            }
         }
 
         // 3b. Calculate Head Bobbing & Running FOV effects

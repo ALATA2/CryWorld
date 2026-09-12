@@ -891,15 +891,22 @@ export class VoxelTerrain {
         const testPos = worldPosition.clone();
         testPos.y = startHeight;
         
-        // Step downwards in larger voxel-sized steps (voxelScale = 3.0)
-        const step = 3.0;
+        let wasAir = !this.isPositionSolid(testPos);
+        const step = 2.0;
+        let lastAirY = wasAir ? testPos.y : null;
+
         while (testPos.y > 0) {
-            if (this.isPositionSolid(testPos)) {
-                // Find exact boundary Y using a mini binary search
+            testPos.y -= step;
+            const isSolid = this.isPositionSolid(testPos);
+            if (!isSolid) {
+                wasAir = true;
+                lastAirY = testPos.y;
+            } else if (wasAir) {
+                // Found transition from air above (lastAirY) to solid below (testPos.y)
                 let low = testPos.y;
-                let high = testPos.y + step;
-                for (let b = 0; b < 10; b++) {
-                    const mid = (low + high) / 2.0;
+                let high = lastAirY;
+                for (let b = 0; b < 8; b++) {
+                    const mid = (low + high) * 0.5;
                     testPos.y = mid;
                     if (this.isPositionSolid(testPos)) {
                         low = mid;
@@ -909,9 +916,39 @@ export class VoxelTerrain {
                 }
                 return low;
             }
-            testPos.y -= step;
         }
         return 0; // Water level base Y
+    }
+
+    // Ceiling height solver: returns the ceiling surface Y above world coordinate, or Infinity if open air
+    getCeilingHeight(worldPosition, maxDistance = 3.0) {
+        const testPos = worldPosition.clone();
+        if (this.isPositionSolid(testPos)) {
+            return testPos.y;
+        }
+        const maxY = testPos.y + maxDistance;
+        const step = 0.25;
+        let lastAirY = testPos.y;
+        while (testPos.y < maxY) {
+            testPos.y += step;
+            if (this.isPositionSolid(testPos)) {
+                // Binary search between lastAirY (air) and testPos.y (solid)
+                let low = lastAirY;
+                let high = testPos.y;
+                for (let b = 0; b < 6; b++) {
+                    const mid = (low + high) * 0.5;
+                    testPos.y = mid;
+                    if (this.isPositionSolid(testPos)) {
+                        high = mid;
+                    } else {
+                        low = mid;
+                    }
+                }
+                return high;
+            }
+            lastAirY = testPos.y;
+        }
+        return Infinity;
     }
 
     getEstimatedSurfaceHeight(vx, vz) {
