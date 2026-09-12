@@ -231,7 +231,7 @@ class VoxelChunk {
         const size = terrain.chunkSize + 1;
         this.densities = new Float32Array(size * size * size);
         this.initialized = false;
-        this.dirty = true;
+        this.dirty = false;
     }
 
     initializeDensities() {
@@ -263,6 +263,9 @@ class VoxelChunk {
         const k = vz - this.cz * this.terrain.chunkSize;
         
         if (i >= 0 && i < size && j >= 0 && j < size && k >= 0 && k < size) {
+            if (!this.initialized) {
+                this.initializeDensities();
+            }
             const idx = i + j * size + k * size * size;
             this.densities[idx] = value;
             this.dirty = true;
@@ -438,6 +441,7 @@ export class VoxelTerrain {
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
         this.modifiedColumns = new Set();
+        this.locallyModifiedChunks = new Set();
         
         // Group to hold all chunk meshes
         this.group = new THREE.Group();
@@ -492,6 +496,7 @@ export class VoxelTerrain {
                     if (this.loadedChunks.has(chunkKey)) {
                         const chunk = this.loadedChunks.get(chunkKey);
                         chunk.setLocalDensity(x, y, z, value);
+                        this.locallyModifiedChunks.add(chunk);
                     }
                 }
             }
@@ -705,6 +710,7 @@ export class VoxelTerrain {
                             if (distColSq <= immRadiusSq) {
                                 chunk.rebuild();
                             } else {
+                                chunk.dirty = true;
                                 this.chunkBuildQueue.push(chunk);
                             }
                         }
@@ -779,11 +785,14 @@ export class VoxelTerrain {
     }
 
     update() {
-        // Rebuild loaded dirty chunks
-        for (const chunk of this.loadedChunks.values()) {
-            if (chunk.dirty) {
-                chunk.rebuild();
+        // Rebuild ONLY the chunks that were directly modified by player interaction
+        if (this.locallyModifiedChunks && this.locallyModifiedChunks.size > 0) {
+            for (const chunk of this.locallyModifiedChunks) {
+                if (chunk.dirty) {
+                    chunk.rebuild();
+                }
             }
+            this.locallyModifiedChunks.clear();
         }
     }
 
