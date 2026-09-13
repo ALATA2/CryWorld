@@ -248,18 +248,20 @@ function init() {
     updateSky();
 
     // 5. Planetary Spherical Ocean Setup (Perfect 360° circular celestial planet body)
+    const waterNormalsTexture = new THREE.TextureLoader().load('waternormals.jpg', function (texture) {
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+    });
+
     const waterGeometry = new THREE.CircleGeometry(3200, 160);
     water = new Water(
         waterGeometry,
         {
             textureWidth: 512,
             textureHeight: 512,
-            waterNormals: new THREE.TextureLoader().load('waternormals.jpg', function (texture) {
-                texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-                texture.minFilter = THREE.LinearMipmapLinearFilter;
-                texture.magFilter = THREE.LinearFilter;
-                texture.generateMipmaps = true;
-            }),
+            waterNormals: waterNormalsTexture,
             sunDirection: sun,
             sunColor: 0xffdfaa, // Bright sunlight specular reflections
             waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
@@ -354,7 +356,7 @@ function init() {
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
 
     // 6b. Dynamic Canal Water & Flow System
-    waterSystem = new WaterSystem(scene, terrain, camera, water.material.uniforms['waterNormals'].value);
+    waterSystem = new WaterSystem(scene, terrain, camera, waterNormalsTexture);
     water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
     water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
