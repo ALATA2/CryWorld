@@ -646,6 +646,11 @@ export class VoxelTerrain {
         return density;
     }
 
+    // Returns true if the column is naturally open ocean at sea level (y = 40, world Y = 120.0m)
+    isNaturalOcean(vx, vz) {
+        return this.getBaseDensity(vx, 40, vz) < 0.0;
+    }
+
     hasPotentialTerrain(cx, cy, cz) {
         if (cy === this.minChunkY) return true; // Seabed floor is solid at minChunkY
         

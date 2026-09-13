@@ -3,13 +3,14 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { VoxelTerrain } from './marching_cubes.js';
+import { WaterSystem } from './water_system.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, heightmapTexture, heightmapData;
+let terrain, water, sky, sun, heightmapTexture, heightmapData, waterSystem;
 const cameraPosUniform = { value: new THREE.Vector3() };
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
@@ -314,14 +315,25 @@ function init() {
          }`
     );
 
-    // Planetary Atmosphere Limb glow & smooth circular horizon cutoff in fragment shader
+    // Planetary Atmosphere Limb glow, smooth horizon cutoff & island dry land masking in fragment shader
     water.material.fragmentShader = `
         uniform vec3 cameraPos;
+        uniform sampler2D waterMaskTexture;
+        uniform vec4 waterMaskBounds;
     ` + water.material.fragmentShader;
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `float viewDist = length(worldPosition.xyz - eye);
+        `// Check water mask over the island (discard global water plane over dry land)
+         vec2 maskUV = (worldPosition.xz - waterMaskBounds.xy) / waterMaskBounds.zw;
+         if (maskUV.x >= 0.0 && maskUV.x <= 1.0 && maskUV.y >= 0.0 && maskUV.y <= 1.0) {
+             float maskVal = texture2D(waterMaskTexture, maskUV).r;
+             if (maskVal < 0.1) {
+                 discard;
+             }
+         }
+
+         float viewDist = length(worldPosition.xyz - eye);
          float distFade = smoothstep(15.0, 120.0, viewDist);
          float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
 
@@ -340,6 +352,11 @@ function init() {
 
     // 6. Marching Cubes Voxel Terrain Setup
     terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
+
+    // 6b. Dynamic Canal Water & Flow System
+    waterSystem = new WaterSystem(scene, terrain, camera, water.material.uniforms['waterNormals'].value);
+    water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
+    water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
     const startX = 0;
     const startZ = 280; // Grassy plateau of the volcano island (altitude ~125.2m, dry land)
@@ -1126,6 +1143,9 @@ function handleTerrainInteraction() {
                 terrain.update();
                 updateHeightmap(hit.point, manipulatorRadius);
                 checkFoliageFalling(hit.point, manipulatorRadius); // Only check nearby trees/rocks!
+                if (waterSystem && isDigging) {
+                    waterSystem.onTerrainExcavated(hit.point, manipulatorRadius);
+                }
             }
         }
     }
@@ -1173,8 +1193,14 @@ function animate() {
         // 2. Terrain Interaction (Dig/Build holding mouse)
         handleTerrainInteraction();
 
+        // Update dynamic water simulation and flow
+        if (waterSystem) {
+            waterSystem.update(delta);
+        }
+
         // 3. Movement Physics (Gravity & Collisions)
-        const inWater = camera.position.y < 120.0;
+        const localWaterLevel = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
+        const inWater = !isFlying && (camera.position.y < localWaterLevel);
         
         // Walk controls dampening (less horizontal drag in water to glide)
         const dragFactor = isFlying ? 5.0 : (inWater ? 6.0 : 10.0);
@@ -1201,8 +1227,8 @@ function animate() {
             if (isFlying) {
                 // Fly upwards (3x speed with Shift: 270.0 vs 90.0)
                 velocity.y += (keyStates.ShiftLeft ? 270.0 : 90.0) * delta;
-            } else if (inWater || camera.position.y < 120.8) {
-                if (camera.position.y >= 118.5) {
+            } else if (inWater || (camera.position.y < localWaterLevel + 0.8 && camera.position.y >= localWaterLevel - 1.5)) {
+                if (camera.position.y >= localWaterLevel - 1.5) {
                     // Surface water-exit jump / leap onto shore
                     velocity.y = Math.max(velocity.y, jumpForce * 1.15);
                 } else {
@@ -1258,7 +1284,7 @@ function animate() {
                 velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
             } else if (!keyStates.Space) {
                 // Buoyancy: slowly float up to the surface if idle
-                const floatSurface = 120.1; // target eye level at surface
+                const floatSurface = localWaterLevel + 0.1; // target eye level at surface
                 if (camera.position.y < floatSurface) {
                     const diff = floatSurface - camera.position.y;
                     velocity.y += diff * 2.0 * delta;
@@ -1294,9 +1320,10 @@ function animate() {
             // instead of letting submerged body cylinders collide with the underwater sand slope
             const getEffectiveTestY = (testX, testZ) => {
                 let testY = eyeY;
-                if ((inWater || eyeY < 121.5) && currentCeilingY === Infinity) {
-                    const candidateGround = terrain.getSurfaceHeight(new THREE.Vector3(testX, 122.5, testZ), 122.5);
-                    if (candidateGround <= 121.8 && candidateGround >= (eyeY - playerHeight)) {
+                const testWaterY = waterSystem ? waterSystem.getWaterLevelAt(testX, testZ) : 120.0;
+                if ((inWater || eyeY < testWaterY + 1.5) && currentCeilingY === Infinity) {
+                    const candidateGround = terrain.getSurfaceHeight(new THREE.Vector3(testX, testWaterY + 2.5, testZ), testWaterY + 2.5);
+                    if (candidateGround <= (testWaterY + 1.8) && candidateGround >= (eyeY - playerHeight)) {
                         testY = Math.max(eyeY, candidateGround + playerHeight);
                     }
                 }
@@ -1407,8 +1434,8 @@ function animate() {
 
                 // Step-up tolerance:
                 // Normal walking step on land: up to 0.5m.
-                // Stepping/wading out of water onto beach/shores (groundHeight up to ~121.8m): allow step-up up to 2.6m!
-                const isWaterExit = (inWater || camera.position.y < 121.5) && ceilingY === Infinity && groundHeight <= 121.8 && groundHeight >= (camera.position.y - playerHeight);
+                // Stepping/wading out of water onto beach/shores: allow step-up up to 2.6m!
+                const isWaterExit = (inWater || camera.position.y < localWaterLevel + 1.5) && ceilingY === Infinity && groundHeight <= (localWaterLevel + 1.8) && groundHeight >= (camera.position.y - playerHeight);
                 const maxStep = isWaterExit ? 2.6 : 0.5;
 
                 if (diff <= maxStep) {
@@ -1471,10 +1498,11 @@ function animate() {
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
     water.material.uniforms['time'].value += delta * 0.12;
 
-    // 5bb. Check if player camera is underwater (Y < 120.0m) to trigger immersive effects, or high up to trigger space orbit effects
+    // 5bb. Check if player camera is underwater (Y < localWaterLevel) to trigger immersive effects, or high up to trigger space orbit effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
-    const isLookingFromBelow = (camera.position.y < 120.0);
-    const depthFactor = Math.min(Math.max((120.0 - camera.position.y) / 512.0, 0.0), 1.0);
+    const localWaterAtCamera = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
+    const isLookingFromBelow = (camera.position.y < localWaterAtCamera);
+    const depthFactor = Math.min(Math.max((localWaterAtCamera - camera.position.y) / 512.0, 0.0), 1.0);
     
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
