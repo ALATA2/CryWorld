@@ -946,22 +946,50 @@ export class VoxelTerrain {
         return false;
     }
 
-    // Walk height solver: returns the exact surface height Y under a world coordinate
+    // Walk height solver: returns the exact surface height Y under or at a world coordinate
     getSurfaceHeight(worldPosition, startHeight = 64) {
         const testPos = worldPosition.clone();
         testPos.y = startHeight;
         
-        let wasAir = !this.isPositionSolid(testPos);
-        const step = 2.0;
-        let lastAirY = wasAir ? testPos.y : null;
+        // CASE 1: startHeight is inside solid terrain!
+        // The surface is ABOVE startHeight. Search upwards to find where solid transitions to air.
+        if (this.isPositionSolid(testPos)) {
+            const maxUpY = Math.min(this.maxWorldY, startHeight + 35.0);
+            const upStep = 0.5;
+            let lastSolidY = testPos.y;
+            
+            while (testPos.y < maxUpY) {
+                testPos.y += upStep;
+                if (!this.isPositionSolid(testPos)) {
+                    // Found transition: solid below (lastSolidY) to air above (testPos.y)
+                    let low = lastSolidY;
+                    let high = testPos.y;
+                    for (let b = 0; b < 8; b++) {
+                        const mid = (low + high) * 0.5;
+                        testPos.y = mid;
+                        if (this.isPositionSolid(testPos)) {
+                            low = mid;
+                        } else {
+                            high = mid;
+                        }
+                    }
+                    return low;
+                }
+                lastSolidY = testPos.y;
+            }
+            return lastSolidY;
+        }
+
+        // CASE 2: startHeight is in air. Search downwards to find where air transitions to solid.
+        const step = 1.0;
+        let lastAirY = testPos.y;
 
         while (testPos.y > this.minWorldY) {
             testPos.y -= step;
             const isSolid = this.isPositionSolid(testPos);
             if (!isSolid) {
-                wasAir = true;
                 lastAirY = testPos.y;
-            } else if (wasAir) {
+            } else {
                 // Found transition from air above (lastAirY) to solid below (testPos.y)
                 let low = testPos.y;
                 let high = lastAirY;
@@ -984,7 +1012,7 @@ export class VoxelTerrain {
     getCeilingHeight(worldPosition, maxDistance = 3.0) {
         const testPos = worldPosition.clone();
         if (this.isPositionSolid(testPos)) {
-            return testPos.y;
+            return Infinity; // Embedded in solid terrain, not an open ceiling above an air pocket
         }
         const maxY = testPos.y + maxDistance;
         const step = 0.25;

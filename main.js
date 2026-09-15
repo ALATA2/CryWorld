@@ -1148,6 +1148,19 @@ function handleTerrainInteraction() {
                 if (waterSystem && isDigging) {
                     waterSystem.onTerrainExcavated(hit.point, manipulatorRadius);
                 }
+
+                // If terrain modification happened near the player, resolve player grounding immediately!
+                if (!isFlying) {
+                    const distToPlayer = hit.point.distanceTo(camera.position);
+                    if (distToPlayer < manipulatorRadius + 3.0) {
+                        const immediateGround = terrain.getSurfaceHeight(camera.position, camera.position.y + 0.8);
+                        if (camera.position.y - playerHeight < immediateGround) {
+                            camera.position.y = immediateGround + playerHeight;
+                            velocity.y = 0;
+                            isGrounded = true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1420,39 +1433,41 @@ function animate() {
                 camera.position.y = Math.min(camera.position.y, ceilingY - headOffset);
             }
 
-            // 2. Floor collision check: search downwards from inside current air pocket (or above beach if outdoors)
+            // 2. Floor collision check: search downwards from inside current air pocket
             const searchStartY = (ceilingY !== Infinity)
                 ? Math.min(camera.position.y + 0.3, ceilingY - 0.2)
-                : Math.max(camera.position.y + 1.2, 122.5);
+                : camera.position.y + 0.8;
             const groundHeight = terrain.getSurfaceHeight(camera.position, searchStartY);
 
             if (camera.position.y - playerHeight <= groundHeight) {
                 const targetY = groundHeight + playerHeight;
-                const diff = targetY - camera.position.y;
                 
                 // Never let floor resolution push the player's head into or above the ceiling
                 const maxAllowedY = (ceilingY !== Infinity) ? (ceilingY - headOffset) : Infinity;
                 const clampedTargetY = Math.min(targetY, maxAllowedY);
 
-                // Step-up tolerance:
-                // Normal walking step on land: up to 0.5m.
-                // Stepping/wading out of water onto beach/shores: allow step-up up to 2.6m!
-                const isWaterExit = (inWater || camera.position.y < localWaterLevel + 1.5) && ceilingY === Infinity && groundHeight <= (localWaterLevel + 1.8) && groundHeight >= (camera.position.y - playerHeight);
-                const maxStep = isWaterExit ? 2.6 : 0.5;
-
-                if (diff <= maxStep) {
-                    if (Math.abs(clampedTargetY - camera.position.y) > 0.4) {
-                        camera.position.y = clampedTargetY;
-                    } else {
-                        camera.position.y += (clampedTargetY - camera.position.y) * 25.0 * delta;
-                    }
-                    velocity.y = 0;
-                    isGrounded = true;
+                if (camera.position.y < clampedTargetY) {
+                    // Player penetrated or embedded into floor: immediately snap up to ground level
+                    camera.position.y = clampedTargetY;
+                } else if (Math.abs(clampedTargetY - camera.position.y) > 0.4) {
+                    camera.position.y = clampedTargetY;
                 } else {
-                    isGrounded = false;
+                    camera.position.y += (clampedTargetY - camera.position.y) * 25.0 * delta;
                 }
+                velocity.y = 0;
+                isGrounded = true;
             } else {
                 isGrounded = false;
+            }
+
+            // Fail-safe de-penetration: if player camera/torso is ever embedded inside solid terrain, pop up to surface
+            if (terrain.isPositionSolid(camera.position)) {
+                const safeSurfaceY = terrain.getSurfaceHeight(camera.position, camera.position.y);
+                if (safeSurfaceY > terrain.minWorldY + 10.0) {
+                    camera.position.y = safeSurfaceY + playerHeight;
+                    velocity.y = 0;
+                    isGrounded = true;
+                }
             }
 
             // Prevent falling below the deep ocean floor level (512m below sea level 120.0m)
