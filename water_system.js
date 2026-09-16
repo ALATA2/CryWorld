@@ -169,7 +169,7 @@ export class WaterSystem {
     setMaskTexel(vx, vz, value) {
         const wx = vx * this.voxelScale;
         const wz = vz * this.voxelScale;
-        const halfV = this.voxelScale * 0.6;
+        const halfV = this.voxelScale * 0.75;
 
         const tx0 = Math.floor((wx - halfV - this.maskMinX) / this.maskTexelSize);
         const tx1 = Math.floor((wx + halfV - this.maskMinX) / this.maskTexelSize);
@@ -210,17 +210,14 @@ export class WaterSystem {
                 // Se è già mare naturale aperto, non necessita di gestione canale
                 if (this.terrain.isNaturalOcean(vx, vz)) continue;
 
-                // Cerca la quota del fondo partendo da aria aperta sopra lo scavo
-                const searchY = Math.max(this.seaLevel + 1.5, hitPoint.y + 1.0);
-                const testPos = new THREE.Vector3(wx, searchY, wz);
+                // Verifichiamo se a quota pelo d'acqua (119.8m) c'è aria libera (scavo aperto sotto il livello del mare)
+                const testPos = new THREE.Vector3(wx, 119.8, wz);
+                if (this.terrain.isPositionSolid(testPos)) continue; // Terraferma solida non scavata sotto 120m
 
-                // Se il punto di partenza è roccia solida, non è una trincea a cielo aperto
-                if (this.terrain.isPositionSolid(testPos)) continue;
-
-                const floorY = this.terrain.getSurfaceHeight(testPos, searchY);
+                // Calcola la quota effettiva del fondo dello scavo scendendo dall'aria aperta a 119.8m
+                const floorY = this.terrain.getSurfaceHeight(testPos, 119.8);
 
                 // Uno scavo valido per un canale a cielo aperto ha fondo tra 105m e 120m
-                // (elimina false letture di fondo abissale a -393m)
                 if (floorY >= 105.0 && floorY < this.seaLevel) {
                     const key = `${vx},${vz}`;
                     let cell = this.excavatedCells.get(key);
@@ -231,7 +228,7 @@ export class WaterSystem {
                             worldX: wx,
                             worldZ: wz,
                             floorY: floorY,
-                            waterLevel: floorY, // Inizia asciutta sul fondo effettivo dello scavo!
+                            waterLevel: floorY, // Inizia asciutta sul fondo effettivo dello scavo
                             state: 'DRY',
                             inflowRate: 0,
                             flowDir: new THREE.Vector2(0, 0),
@@ -239,7 +236,7 @@ export class WaterSystem {
                         };
                         this.excavatedCells.set(key, cell);
                     } else {
-                        // Aggiorna profondità se scavata più a fondo (mantenendo limite ragionevole)
+                        // Aggiorna profondità se scavata più a fondo
                         cell.floorY = Math.max(105.0, Math.min(cell.floorY, floorY));
                     }
                     touchedColumns.push(cell);
@@ -247,22 +244,25 @@ export class WaterSystem {
             }
         }
 
-        // Controlla se una delle colonne tocca l'oceano aperto o una cella già allagata
+        // Controlla e propaga a cascata l'inflow verso tutte le celle scavate collegate
         this.checkBreaches(touchedColumns);
     }
 
     /**
-     * Verifica la presenza di brecce tra le celle asciutte e sorgenti d'acqua.
+     * Verifica la presenza di brecce tra le celle asciutte e sorgenti d'acqua (oceano o celle allagate),
+     * propagando a cascata l'inflow d'acqua in tutte le 8 direzioni (ortogonali + diagonali).
      */
     checkBreaches(cellsToCheck) {
         const neighbors = [
-            { dx: 1, dz: 0 },
-            { dx: -1, dz: 0 },
-            { dx: 0, dz: 1 },
-            { dx: 0, dz: -1 }
+            { dx: 1, dz: 0 }, { dx: -1, dz: 0 }, { dx: 0, dz: 1 }, { dx: 0, dz: -1 },
+            { dx: 1, dz: 1 }, { dx: -1, dz: 1 }, { dx: 1, dz: -1 }, { dx: -1, dz: -1 }
         ];
 
-        for (const cell of cellsToCheck) {
+        // Coda per risvegliare a cascata l'intero canale fino in fondo
+        const queue = [...cellsToCheck];
+
+        while (queue.length > 0) {
+            const cell = queue.shift();
             if (cell.state !== 'DRY') continue;
 
             for (const n of neighbors) {
@@ -273,28 +273,25 @@ export class WaterSystem {
 
                 const isOcean = this.terrain.isNaturalOcean(nx, nz);
                 const nCell = this.excavatedCells.get(`${nx},${nz}`);
-                const isFlooded = nCell && (nCell.state === 'FLOODED' || (nCell.state === 'FLOWING' && nCell.waterLevel > cell.floorY + 0.2));
+                const isWaterSource = isOcean || (nCell && (nCell.state === 'FLOODED' || (nCell.state === 'FLOWING' && nCell.waterLevel > cell.floorY + 0.1)));
 
-                if (isOcean || isFlooded) {
-                    // Controlla se il varco è aperto verificando che ci sia aria a quota 120m
+                if (isWaterSource) {
+                    // Controlla se il varco a pelo d'acqua (119.8m) è aperto
                     const mx = (cell.worldX + nwx) * 0.5;
                     const mz = (cell.worldZ + nwz) * 0.5;
-                    const midPos = new THREE.Vector3(mx, this.seaLevel + 1.0, mz);
+                    const midPos = new THREE.Vector3(mx, 119.8, mz);
 
-                    // Il passaggio deve essere aria aperta (non una barriera solida di roccia)
+                    // Il passaggio a quota 119.8m deve essere aria (non roccia solida)
                     if (this.terrain.isPositionSolid(midPos)) continue;
 
-                    const midFloorY = this.terrain.getSurfaceHeight(midPos, this.seaLevel + 1.0);
+                    const midFloorY = this.terrain.getSurfaceHeight(midPos, 119.8);
 
                     if (midFloorY >= 105.0 && midFloorY < this.seaLevel) {
                         // BRECCIA APERTA!
-                        // Calcolo idraulico: Sezione = Larghezza (3m) x Profondità varco
-                        const openingDepth = Math.min(10.0, Math.max(0.3, this.seaLevel - midFloorY));
-                        const openingWidth = this.voxelScale; // 3 metri per voxel
-                        const inletArea = openingWidth * openingDepth;
-
-                        // Portata volumetrica Q (m³/s) = Area * velocità ingresso (~2.8 m/s)
-                        const inflowRate = inletArea * 2.8;
+                        const sourceInflow = isOcean ? 32.0 : (nCell ? (nCell.inflowRate || 25.0) : 25.0);
+                        const openingDepth = Math.min(10.0, Math.max(0.4, this.seaLevel - midFloorY));
+                        const inletArea = this.voxelScale * openingDepth;
+                        const inflowRate = Math.min(sourceInflow, Math.max(14.0, inletArea * 2.8));
 
                         cell.state = 'FLOWING';
                         cell.inflowRate = Math.max(cell.inflowRate, inflowRate);
@@ -302,8 +299,15 @@ export class WaterSystem {
                         cell.foamIntensity = Math.min(1.0, inflowRate / 18.0);
                         this.flowingCells.add(cell);
 
-                        // Imposta volume audio proporzionato alla portata
                         this.targetAudioVolume = Math.min(0.35, (inflowRate / 40.0) * 0.35);
+
+                        // Risveglia a cascata i vicini DRY lungo il canale
+                        for (const n2 of neighbors) {
+                            const n2Cell = this.excavatedCells.get(`${cell.vx + n2.dx},${cell.vz + n2.dz}`);
+                            if (n2Cell && n2Cell.state === 'DRY') {
+                                queue.push(n2Cell);
+                            }
+                        }
                         break;
                     }
                 }
@@ -318,10 +322,8 @@ export class WaterSystem {
         if (this.flowingCells.size === 0 && !this.maskNeedsUpdate) return;
 
         const neighbors = [
-            { dx: 1, dz: 0 },
-            { dx: -1, dz: 0 },
-            { dx: 0, dz: 1 },
-            { dx: 0, dz: -1 }
+            { dx: 1, dz: 0 }, { dx: -1, dz: 0 }, { dx: 0, dz: 1 }, { dx: 0, dz: -1 },
+            { dx: 1, dz: 1 }, { dx: -1, dz: 1 }, { dx: 1, dz: -1 }, { dx: -1, dz: -1 }
         ];
 
         const cellsToFlood = [];
@@ -330,8 +332,6 @@ export class WaterSystem {
 
         for (const cell of this.flowingCells) {
             // Velocità di salita dell'acqua: dY = (Portata / AreaCella) * delta
-            // Maggiore la portata della breccia, più rapida è la salita.
-            // Più è profondo lo scavo, più volume occorre per colmarlo.
             const riseSpeed = (cell.inflowRate / cellArea);
             const clampedRise = Math.min(riseSpeed, 6.0) * delta;
 
@@ -349,25 +349,23 @@ export class WaterSystem {
                 cell.foamIntensity = (1.0 - fillProgress) * Math.min(1.0, cell.inflowRate / 15.0);
             }
 
-            // Propaga l'acqua alle celle asciutte adiacenti
+            // Propaga l'acqua alle celle asciutte adiacenti (in tutte le 8 direzioni)
             for (const n of neighbors) {
                 const nx = cell.vx + n.dx;
                 const nz = cell.vz + n.dz;
                 const nCell = this.excavatedCells.get(`${nx},${nz}`);
 
                 if (nCell && nCell.state === 'DRY') {
-                    // Controlla se il varco è aperto e se la quota d'acqua supera il dosso
                     const mx = (cell.worldX + nCell.worldX) * 0.5;
                     const mz = (cell.worldZ + nCell.worldZ) * 0.5;
-                    const midPos = new THREE.Vector3(mx, this.seaLevel + 1.0, mz);
+                    const midPos = new THREE.Vector3(mx, 119.8, mz);
 
                     if (!this.terrain.isPositionSolid(midPos)) {
-                        const midFloorY = this.terrain.getSurfaceHeight(midPos, this.seaLevel + 1.0);
+                        const midFloorY = this.terrain.getSurfaceHeight(midPos, 119.8);
 
-                        if (midFloorY >= 105.0 && cell.waterLevel > midFloorY + 0.1) {
+                        if (midFloorY >= 105.0 && cell.waterLevel > midFloorY + 0.05) {
                             nCell.state = 'FLOWING';
-                            // La portata si distribuisce lungo il canale
-                            nCell.inflowRate = cell.inflowRate * 0.92;
+                            nCell.inflowRate = cell.inflowRate * 0.95;
                             nCell.flowDir.set(nCell.worldX - cell.worldX, nCell.worldZ - cell.worldZ).normalize();
                             newFlowingCells.push(nCell);
                         }
@@ -382,6 +380,28 @@ export class WaterSystem {
             this.floodedCells.add(cell);
             // Abilita il mare globale a quota 120m per questa cella
             this.setMaskTexel(cell.vx, cell.vz, 255);
+
+            // Propaga da cella appena allagata a eventuali celle DRY adiacenti
+            for (const n of neighbors) {
+                const nx = cell.vx + n.dx;
+                const nz = cell.vz + n.dz;
+                const nCell = this.excavatedCells.get(`${nx},${nz}`);
+                if (nCell && nCell.state === 'DRY') {
+                    const mx = (cell.worldX + nCell.worldX) * 0.5;
+                    const mz = (cell.worldZ + nCell.worldZ) * 0.5;
+                    const midPos = new THREE.Vector3(mx, 119.8, mz);
+
+                    if (!this.terrain.isPositionSolid(midPos)) {
+                        const midFloorY = this.terrain.getSurfaceHeight(midPos, 119.8);
+                        if (midFloorY >= 105.0 && midFloorY < this.seaLevel) {
+                            nCell.state = 'FLOWING';
+                            nCell.inflowRate = 25.0;
+                            nCell.flowDir.set(nCell.worldX - cell.worldX, nCell.worldZ - cell.worldZ).normalize();
+                            newFlowingCells.push(nCell);
+                        }
+                    }
+                }
+            }
         }
 
         for (const cell of newFlowingCells) {
@@ -421,7 +441,7 @@ export class WaterSystem {
         const colors = [];
         const uvs = [];
 
-        const halfV = this.voxelScale * 0.5;
+        const halfV = this.voxelScale * 0.52;
 
         // Renderizza SOLO le celle attivamente in fase di riempimento (FLOWING)
         // Le celle FLOODED sono renderizzate direttamente dal piano mare globale
