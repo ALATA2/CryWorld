@@ -46,6 +46,8 @@ try {
                 ".jpg"  { "image/jpeg" }
                 ".jpeg" { "image/jpeg" }
                 ".ico"  { "image/x-icon" }
+                ".mp3"  { "audio/mpeg" }
+                ".wav"  { "audio/wav" }
                 default { "application/octet-stream" }
             }
             

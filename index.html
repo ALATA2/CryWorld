@@ -637,7 +637,7 @@
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.191</div>
+        <div id="homepage-version">V 0.192</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
@@ -654,6 +654,7 @@
                     <li><span class="key">Click SX</span> &nbsp; <b>Scava</b> il terreno (Rimuovi voxel)</li>
                     <li><span class="key">Click DX</span> &nbsp; <b>Crea</b> il terreno (Aggiungi voxel)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Cambia equipaggiamento (Hotbar)</li>
+                    <li><span class="key">M</span> &nbsp; Musica ON / OFF</li>
                     <li><span class="key">ESC</span> &nbsp; Menu di uscita / Pausa</li>
                 </ul>
             </div>
@@ -681,10 +682,13 @@
                 FPS: <span id="fps-counter">60</span>
             </div>
             <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
-                V 0.191
+                V 0.192
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>
+            </div>
+            <div id="music-card" class="hud-card music-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #80e5ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px); cursor: pointer; user-select: none;" title="Premi M o clicca per attivare/disattivare musica">
+                <span id="music-icon">🎵</span> <span id="music-status">BGM: ON</span>
             </div>
         </div>
 

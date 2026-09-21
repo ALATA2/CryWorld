@@ -59,6 +59,13 @@ const crosshair = document.getElementById('crosshair');
 let manipulatorHud;
 let manipulatorRadius = 3.5;
 
+// Background Ambient Music variables
+let bgMusic = null;
+const BGM_TARGET_VOLUME = 0.20; // Volume ambientale non troppo forte (20%)
+let bgmCurrentVolume = 0.0;
+let bgmPlaying = false;
+let bgmMuted = false;
+
 // FPS counting variables
 let fpsLastTime = performance.now();
 let fpsFrames = 0;
@@ -427,9 +434,11 @@ function init() {
             
             controls.enabled = true;
             gameStarted = true;
+            startBackgroundMusic();
         });
     } else {
         blocker.addEventListener('click', () => {
+            startBackgroundMusic();
             controls.lock();
         });
     }
@@ -438,6 +447,7 @@ function init() {
         blocker.style.display = 'none';
         document.getElementById('esc-confirm').classList.add('hidden');
         gameStarted = true;
+        startBackgroundMusic();
     });
 
     controls.addEventListener('unlock', () => {
@@ -467,12 +477,14 @@ function init() {
     document.getElementById('btn-confirm-no').addEventListener('click', () => {
         escConfirm.classList.add('hidden');
         controls.lock(); // return to game
+        startBackgroundMusic();
     });
 
     document.getElementById('btn-confirm-yes').addEventListener('click', () => {
         escConfirm.classList.add('hidden');
         gameStarted = false;
         blocker.style.display = 'flex'; // go back to homepage
+        stopBackgroundMusic();
         
         // Reset player coordinates to start island position
         const resetPos = new THREE.Vector3(startX, 130, startZ);
@@ -816,6 +828,9 @@ function init() {
     // 7c. Spawning Stylized Foliage and Rocks on the Voxel Terrain
     spawnEnvironmentObjects(scene, terrain);
 
+    // 7d. Background Ambient Music Setup
+    initBackgroundMusic();
+
     // 8. Event Listeners
     setupInputListeners();
 
@@ -824,6 +839,100 @@ function init() {
 
     // Adjust sizes on resize
     window.addEventListener('resize', onWindowResize);
+}
+
+// ==========================================
+// BACKGROUND AMBIENT MUSIC SYSTEM
+// ==========================================
+function initBackgroundMusic() {
+    if (bgMusic) return;
+    try {
+        bgMusic = new Audio('musiche/Cryworld1-Daniele%20-%20Remix%202026.mp3');
+        bgMusic.loop = true;
+        bgMusic.volume = 0;
+        bgMusic.preload = 'auto';
+    } catch (e) {
+        console.warn('[Music] Impossibile inizializzare traccia audio:', e);
+    }
+}
+
+function startBackgroundMusic() {
+    if (!bgMusic) {
+        initBackgroundMusic();
+    }
+    if (!bgMusic) return;
+
+    bgmPlaying = true;
+    if (bgMusic.paused) {
+        const playPromise = bgMusic.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(err => {
+                console.log('[Music] Riproduzione in attesa di interazione:', err.message);
+            });
+        }
+    }
+}
+
+function pauseBackgroundMusic() {
+    bgmPlaying = false;
+}
+
+function stopBackgroundMusic() {
+    bgmPlaying = false;
+    if (bgMusic) {
+        bgMusic.pause();
+        bgMusic.currentTime = 0;
+        bgmCurrentVolume = 0;
+        bgMusic.volume = 0;
+    }
+}
+
+function toggleMusicMute() {
+    bgmMuted = !bgmMuted;
+    updateMusicHud();
+    return bgmMuted;
+}
+
+function updateMusicHud() {
+    const musicIcon = document.getElementById('music-icon');
+    const musicStatus = document.getElementById('music-status');
+    const musicCard = document.getElementById('music-card');
+    if (musicIcon && musicStatus) {
+        if (bgmMuted) {
+            musicIcon.textContent = '🔇';
+            musicStatus.textContent = 'BGM: OFF';
+            if (musicCard) musicCard.style.color = '#ff6b6b';
+        } else {
+            musicIcon.textContent = '🎵';
+            musicStatus.textContent = 'BGM: ON';
+            if (musicCard) musicCard.style.color = '#80e5ff';
+        }
+    }
+}
+
+function updateBackgroundMusic(delta) {
+    if (!bgMusic) return;
+
+    // Se mutato o spento: target 0. Se in pausa/menu: volume ridotto a 0.06 (ambientale soft). Se in gameplay: volume pieno 0.20
+    let desiredTarget = 0.0;
+    if (bgmPlaying && !bgmMuted) {
+        desiredTarget = (controls.isLocked || isMobile) ? BGM_TARGET_VOLUME : (BGM_TARGET_VOLUME * 0.35);
+    }
+
+    // Lerp morbido per fade-in e fade-out (circa 1.5 secondi per transizione completa)
+    const fadeSpeed = 1.2;
+    if (Math.abs(bgmCurrentVolume - desiredTarget) > 0.002) {
+        bgmCurrentVolume += (desiredTarget - bgmCurrentVolume) * Math.min(1.0, fadeSpeed * delta);
+        bgMusic.volume = Math.max(0.0, Math.min(1.0, bgmCurrentVolume));
+    } else {
+        bgmCurrentVolume = desiredTarget;
+        bgMusic.volume = bgmCurrentVolume;
+    }
+
+    // Se il volume raggiunge 0 ed è in stop/pausa, metti in pausa per risparmiare risorse
+    if (bgmCurrentVolume <= 0.001 && !bgmPlaying && !bgMusic.paused) {
+        bgMusic.pause();
+    }
 }
 
 // ==========================================
@@ -853,6 +962,9 @@ function setupInputListeners() {
                     altimeterCard.style.display = isFlying ? 'flex' : 'none';
                 }
             }
+        }
+        if (event.code === 'KeyM') {
+            toggleMusicMute();
         }
     };
 
@@ -911,6 +1023,15 @@ function setupInputListeners() {
     // Initialize mobile controls if on touch device
     if (isMobile) {
         setupMobileControls();
+    }
+
+    // Music HUD card click toggle (when cursor is free)
+    const musicCard = document.getElementById('music-card');
+    if (musicCard) {
+        musicCard.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMusicMute();
+        });
     }
 }
 
@@ -1728,6 +1849,9 @@ function animate() {
     if (sky) {
         sky.position.copy(camera.position);
     }
+
+    // 5f. Update background ambient music volume fade and playback
+    updateBackgroundMusic(delta);
 
     renderer.render(scene, camera);
 }
