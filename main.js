@@ -1335,16 +1335,18 @@ function animate() {
         }
 
         // 3. Movement Physics (Gravity & Collisions)
-        const localWaterLevel = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
-        const inWater = !isFlying && (camera.position.y < localWaterLevel);
+        const rawWaterLevel = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
+        const hasWaterHere = (rawWaterLevel > -500.0);
+        const localWaterLevel = hasWaterHere ? rawWaterLevel : 120.0;
+        const inWater = !isFlying && hasWaterHere && (camera.position.y < localWaterLevel);
         
-        // Walk controls dampening (less horizontal drag in water to glide)
-        const dragFactor = isFlying ? 5.0 : (inWater ? 6.0 : 10.0);
+        // Walk controls dampening
+        const dragFactor = isFlying ? 5.0 : (inWater ? 5.0 : 10.0);
         velocity.x -= velocity.x * dragFactor * delta;
         velocity.z -= velocity.z * dragFactor * delta;
         
-        // Strong vertical damping in water to simulate drag and stabilize floating, and flying to stabilize hovering
-        const verticalDrag = isFlying ? 5.0 : (inWater ? 4.0 : 1.0);
+        // Vertical damping
+        const verticalDrag = isFlying ? 5.0 : (inWater ? 3.5 : 1.0);
         velocity.y -= velocity.y * verticalDrag * delta;
 
         // Apply gravity (neutralized/reduced underwater to feel buoyant, and in orbit to feel weightless)
@@ -1358,19 +1360,24 @@ function animate() {
             velocity.y -= gravity * gravityMultiplier * delta;
         }
 
+        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
+
         // Jump execution or swim/fly upwards
         if (keyStates.Space) {
             if (isFlying) {
                 // Fly upwards (3x speed with Shift: 270.0 vs 90.0)
                 velocity.y += (keyStates.ShiftLeft ? 270.0 : 90.0) * delta;
-            } else if (inWater || (camera.position.y < localWaterLevel + 0.8 && camera.position.y >= localWaterLevel - 1.5)) {
-                if (camera.position.y >= localWaterLevel - 1.5) {
-                    // Surface water-exit jump / leap onto shore
-                    velocity.y = Math.max(velocity.y, jumpForce * 1.15);
-                } else {
-                    // Swim upwards actively using Space
-                    velocity.y += 35.0 * delta;
+            } else if (hasWaterHere && (camera.position.y < localWaterLevel + 1.2 && camera.position.y >= localWaterLevel - 1.8)) {
+                // Surface water-exit jump / leap onto shore / canal bank
+                velocity.y = Math.max(velocity.y, jumpForce * 1.3);
+                // Extra forward impulse towards shore
+                if (isMoving) {
+                    velocity.x -= direction.x * 35.0 * delta;
+                    velocity.z -= direction.z * 35.0 * delta;
                 }
+            } else if (inWater) {
+                // Swim upwards actively using Space
+                velocity.y += 45.0 * delta;
             } else if (isGrounded) {
                 velocity.y = jumpForce;
                 isGrounded = false;
@@ -1393,11 +1400,10 @@ function animate() {
         } else {
             currentSpeed = keyStates.ShiftLeft ? runSpeed : moveSpeed;
             if (inWater) {
-                currentSpeed *= 0.45;
+                // Fast and responsive swimming speed
+                currentSpeed *= keyStates.ShiftLeft ? 0.85 : 0.65;
             }
         }
-
-        const isMoving = keyStates.KeyW || keyStates.KeyS || keyStates.KeyA || keyStates.KeyD;
 
         if (keyStates.KeyW || keyStates.KeyS) velocity.z -= direction.z * currentSpeed * delta;
         if (keyStates.KeyA || keyStates.KeyD) velocity.x -= direction.x * currentSpeed * delta;
@@ -1408,22 +1414,23 @@ function animate() {
                 // Fly up/down based on camera look direction pitch and move direction (W/S)
                 const lookDir = new THREE.Vector3();
                 camera.getWorldDirection(lookDir);
-                // direction.z is positive for W, negative for S
                 velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
             }
         } else if (inWater) {
+            // Natural surface buoyancy: keeps the player floating at the surface
+            const floatSurface = localWaterLevel + 0.15;
+            if (camera.position.y < floatSurface) {
+                const depthDiff = floatSurface - camera.position.y;
+                const buoyantForce = Math.min(25.0, 5.0 + depthDiff * 4.5);
+                velocity.y += buoyantForce * delta;
+            }
+
             if (isMoving) {
                 // Swim up/down based on camera look direction pitch and move direction (W/S)
                 const lookDir = new THREE.Vector3();
                 camera.getWorldDirection(lookDir);
-                // direction.z is positive for W, negative for S
-                velocity.y += lookDir.y * direction.z * currentSpeed * 0.8 * delta;
-            } else if (!keyStates.Space) {
-                // Buoyancy: slowly float up to the surface if idle
-                const floatSurface = localWaterLevel + 0.1; // target eye level at surface
-                if (camera.position.y < floatSurface) {
-                    const diff = floatSurface - camera.position.y;
-                    velocity.y += diff * 2.0 * delta;
+                if (Math.abs(lookDir.y) > 0.12) {
+                    velocity.y += lookDir.y * direction.z * currentSpeed * 0.85 * delta;
                 }
             }
         }
@@ -1441,44 +1448,71 @@ function animate() {
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
 
-        // Horizontal cave wall collision: axis-separated cylinder collision with smooth wall sliding
+        // Horizontal movement & collision solver (supports smooth shore-climbing and walking up slopes/steps)
         if (!isFlying) {
             const playerRadius = 0.45;
             const eyeY = camera.position.y;
             const newX = camera.position.x;
             const newZ = camera.position.z;
 
-            // Check if player is currently under open sky or inside a cave
-            const currentCeilingY = terrain.getCeilingHeight(camera.position, 2.5);
+            // Helper to resolve horizontal collision and auto-step up onto slopes/beaches/shores
+            const tryMoveHorizontal = (targetX, targetZ, fromX, fromZ) => {
+                // 1. First test: standard collision at current eye height
+                if (!terrain.isCylinderColliding(targetX, eyeY, targetZ, playerRadius, playerHeight)) {
+                    return true;
+                }
 
-            // Effective test Y for horizontal collision:
-            // When swimming or wading near water surface under open sky, allow stepping onto beach/shores
-            // instead of letting submerged body cylinders collide with the underwater sand slope
-            const getEffectiveTestY = (testX, testZ) => {
-                let testY = eyeY;
-                const testWaterY = waterSystem ? waterSystem.getWaterLevelAt(testX, testZ) : 120.0;
-                if ((inWater || eyeY < testWaterY + 1.5) && currentCeilingY === Infinity) {
-                    const candidateGround = terrain.getSurfaceHeight(new THREE.Vector3(testX, testWaterY + 2.5, testZ), testWaterY + 2.5);
-                    if (candidateGround <= (testWaterY + 1.8) && candidateGround >= (eyeY - playerHeight)) {
-                        testY = Math.max(eyeY, candidateGround + playerHeight);
+                // 2. If it collided, check if it's a climbable slope, beach shore, or step!
+                const ceilingAtTarget = terrain.getCeilingHeight(new THREE.Vector3(targetX, eyeY, targetZ), 2.5);
+                const searchStartY = (ceilingAtTarget !== Infinity)
+                    ? Math.min(eyeY + 0.3, ceilingAtTarget - 0.2)
+                    : Math.max(eyeY + 2.0, localWaterLevel + 3.0);
+                
+                const groundAtTarget = terrain.getSurfaceHeight(new THREE.Vector3(targetX, searchStartY, targetZ), searchStartY);
+
+                // Determine reference feet height:
+                // When in or near water, reference can be either player feet or the waterline
+                const feetY = eyeY - playerHeight;
+                const refY = (inWater || eyeY < localWaterLevel + 0.8)
+                    ? Math.max(feetY, localWaterLevel - 0.6)
+                    : feetY;
+                const stepDiff = groundAtTarget - refY;
+
+                // When swimming/wading: can step onto shores up to 2.2m above water level or feet
+                // When walking on land: standard step height of 0.75m
+                const maxStepUp = (inWater || eyeY < localWaterLevel + 1.2) ? 2.2 : 0.75;
+
+                if (stepDiff > 0 && stepDiff <= maxStepUp) {
+                    const proposedEyeY = groundAtTarget + playerHeight;
+                    const maxAllowedEyeY = (ceilingAtTarget !== Infinity) ? (ceilingAtTarget - 0.25) : Infinity;
+
+                    if (proposedEyeY <= maxAllowedEyeY) {
+                        // Check if the body cylinder is clear at the stepped-up eye height
+                        if (!terrain.isCylinderColliding(targetX, proposedEyeY, targetZ, playerRadius, playerHeight)) {
+                            // Clear! Auto-step up smoothly onto the shore / slope
+                            camera.position.y = Math.max(camera.position.y, proposedEyeY);
+                            velocity.y = Math.max(0, velocity.y);
+                            isGrounded = true;
+                            return true;
+                        }
                     }
                 }
-                return testY;
+
+                // Actually blocked by a tall solid wall or low ceiling
+                return false;
             };
 
-            // 1. Try moving along X alone from prevX
+            // 1. Move along X
             let resolvedX = prevX;
-            const testYX = getEffectiveTestY(newX, prevZ);
-            if (!terrain.isCylinderColliding(newX, testYX, prevZ, playerRadius, playerHeight)) {
+            if (tryMoveHorizontal(newX, prevZ, prevX, prevZ)) {
                 resolvedX = newX;
             } else {
                 velocity.x = 0; // Wall hit on X
             }
 
-            // 2. Try moving along Z alone from prevZ using the resolved X
+            // 2. Move along Z
             let resolvedZ = prevZ;
-            const testYZ = getEffectiveTestY(resolvedX, newZ);
-            if (!terrain.isCylinderColliding(resolvedX, testYZ, newZ, playerRadius, playerHeight)) {
+            if (tryMoveHorizontal(resolvedX, newZ, resolvedX, prevZ)) {
                 resolvedZ = newZ;
             } else {
                 velocity.z = 0; // Wall hit on Z
@@ -1557,7 +1591,7 @@ function animate() {
             // 2. Floor collision check: search downwards from inside current air pocket
             const searchStartY = (ceilingY !== Infinity)
                 ? Math.min(camera.position.y + 0.3, ceilingY - 0.2)
-                : camera.position.y + 0.8;
+                : Math.max(camera.position.y + 0.8, localWaterLevel + 1.5);
             const groundHeight = terrain.getSurfaceHeight(camera.position, searchStartY);
 
             if (camera.position.y - playerHeight <= groundHeight) {
