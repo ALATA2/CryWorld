@@ -1338,7 +1338,7 @@ function animate() {
         const rawWaterLevel = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
         const hasWaterHere = (rawWaterLevel > -500.0);
         const localWaterLevel = hasWaterHere ? rawWaterLevel : 120.0;
-        const inWater = !isFlying && hasWaterHere && (camera.position.y < localWaterLevel);
+        const inWater = !isFlying && hasWaterHere && (camera.position.y < localWaterLevel + 0.25);
         
         // Walk controls dampening
         const dragFactor = isFlying ? 5.0 : (inWater ? 5.0 : 10.0);
@@ -1451,38 +1451,50 @@ function animate() {
         // Horizontal movement & collision solver (supports smooth shore-climbing and walking up slopes/steps)
         if (!isFlying) {
             const playerRadius = 0.45;
-            const eyeY = camera.position.y;
             const newX = camera.position.x;
             const newZ = camera.position.z;
 
             // Helper to resolve horizontal collision and auto-step up onto slopes/beaches/shores
-            const tryMoveHorizontal = (targetX, targetZ, fromX, fromZ) => {
+            const tryMoveHorizontal = (targetX, targetZ) => {
+                const currentEyeY = camera.position.y;
+                const currentFeetY = currentEyeY - playerHeight;
+
                 // 1. First test: standard collision at current eye height
-                if (!terrain.isCylinderColliding(targetX, eyeY, targetZ, playerRadius, playerHeight)) {
+                if (!terrain.isCylinderColliding(targetX, currentEyeY, targetZ, playerRadius, playerHeight)) {
                     return true;
                 }
 
                 // 2. If it collided, check if it's a climbable slope, beach shore, or step!
-                const ceilingAtTarget = terrain.getCeilingHeight(new THREE.Vector3(targetX, eyeY, targetZ), 2.5);
+                const targetWaterLevel = waterSystem ? waterSystem.getWaterLevelAt(targetX, targetZ) : 120.0;
+                const effectiveWaterLevel = (targetWaterLevel > -500.0) ? targetWaterLevel : localWaterLevel;
+                const isNearSurface = inWater || (currentEyeY >= effectiveWaterLevel - 2.0 && currentEyeY <= effectiveWaterLevel + 2.5);
+
+                const ceilingAtTarget = terrain.getCeilingHeight(new THREE.Vector3(targetX, currentEyeY, targetZ), 2.5);
                 const searchStartY = (ceilingAtTarget !== Infinity)
-                    ? Math.min(eyeY + 0.3, ceilingAtTarget - 0.2)
-                    : Math.max(eyeY + 2.0, localWaterLevel + 3.0);
+                    ? Math.min(currentEyeY + 0.3, ceilingAtTarget - 0.2)
+                    : Math.max(currentEyeY + 2.5, effectiveWaterLevel + 3.0);
                 
                 const groundAtTarget = terrain.getSurfaceHeight(new THREE.Vector3(targetX, searchStartY, targetZ), searchStartY);
+                const stepDiff = groundAtTarget - currentFeetY;
 
-                // Determine reference feet height:
-                // When in or near water, reference can be either player feet or the waterline
-                const feetY = eyeY - playerHeight;
-                const refY = (inWater || eyeY < localWaterLevel + 0.8)
-                    ? Math.max(feetY, localWaterLevel - 0.6)
-                    : feetY;
-                const stepDiff = groundAtTarget - refY;
+                let canStep = false;
+                if (isNearSurface) {
+                    // When swimming or wading near water:
+                    // Any beach slope, sandbar, canal edge, or island bank up to 2.8m above water level is climbable!
+                    const isShore = (groundAtTarget <= effectiveWaterLevel + 2.8) && (groundAtTarget >= currentFeetY - 0.5);
+                    const isStep = (stepDiff > 0 && stepDiff <= 2.8);
+                    if (isShore || isStep) {
+                        canStep = true;
+                    }
+                } else {
+                    // Normal walking on land or diving deep underwater:
+                    // Standard step height of 0.75m
+                    if (stepDiff > 0 && stepDiff <= 0.75) {
+                        canStep = true;
+                    }
+                }
 
-                // When swimming/wading: can step onto shores up to 2.2m above water level or feet
-                // When walking on land: standard step height of 0.75m
-                const maxStepUp = (inWater || eyeY < localWaterLevel + 1.2) ? 2.2 : 0.75;
-
-                if (stepDiff > 0 && stepDiff <= maxStepUp) {
+                if (canStep) {
                     const proposedEyeY = groundAtTarget + playerHeight;
                     const maxAllowedEyeY = (ceilingAtTarget !== Infinity) ? (ceilingAtTarget - 0.25) : Infinity;
 
@@ -1504,7 +1516,7 @@ function animate() {
 
             // 1. Move along X
             let resolvedX = prevX;
-            if (tryMoveHorizontal(newX, prevZ, prevX, prevZ)) {
+            if (tryMoveHorizontal(newX, prevZ)) {
                 resolvedX = newX;
             } else {
                 velocity.x = 0; // Wall hit on X
@@ -1512,7 +1524,7 @@ function animate() {
 
             // 2. Move along Z
             let resolvedZ = prevZ;
-            if (tryMoveHorizontal(resolvedX, newZ, resolvedX, prevZ)) {
+            if (tryMoveHorizontal(resolvedX, newZ)) {
                 resolvedZ = newZ;
             } else {
                 velocity.z = 0; // Wall hit on Z
