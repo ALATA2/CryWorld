@@ -346,10 +346,13 @@ function init() {
          float distFade = smoothstep(15.0, 120.0, viewDist);
          float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
 
-         // Atmospheric Rayleigh limb halo around the planetary spherical horizon
+         // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
          float distH = length(worldPosition.xz - cameraPos.xz);
          float atmoLimb = smoothstep(1600.0, 2750.0, distH);
-         vec3 atmoHalo = vec3(0.20, 0.70, 1.0) * atmoLimb * 1.5;
+         vec3 atmoHalo = vec3(0.0);
+         if (eye.y >= worldPosition.y) {
+             atmoHalo = vec3(0.20, 0.70, 1.0) * atmoLimb * 1.5;
+         }
          vec3 finalColor = outgoingLight + atmoHalo;
 
          // Smooth circular horizon cutoff (zero square edges)
@@ -1800,7 +1803,7 @@ function animate() {
     const underwaterOverlay = document.getElementById('underwater-overlay');
     const localWaterAtCamera = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
     const isLookingFromBelow = (camera.position.y < localWaterAtCamera);
-    const depthFactor = Math.min(Math.max((localWaterAtCamera - camera.position.y) / 512.0, 0.0), 1.0);
+    const depthFactor = Math.min(Math.max((localWaterAtCamera - camera.position.y) / 80.0, 0.0), 1.0);
     
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
@@ -1835,35 +1838,52 @@ function animate() {
     const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
  
     if (isLookingFromBelow) {
+        // Completely hide the sky dome and clouds while underwater so no daylight sky/horizon leaks through
+        if (sky) sky.visible = false;
+        if (clouds) {
+            for (let i = 0; i < clouds.length; i++) clouds[i].visible = false;
+        }
+
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
-            const baseOpacity = 0.25 * depthFactor;
-            const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.03 * depthFactor;
-            underwaterOverlay.style.background = `rgba(0, 120, 180, ${Math.max(0.0, wavePulse)})`;
+            const baseOpacity = 0.22 + 0.18 * depthFactor;
+            const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.02 * depthFactor;
+            underwaterOverlay.style.background = `rgba(0, 35, 60, ${Math.max(0.0, wavePulse)})`;
         }
  
-        // Interpolate fog color from clear shallow water cyan to dark deep ocean abyss
-        const shallowWaterFog = new THREE.Color(0x007799);
-        const deepWaterFog = new THREE.Color(0x000511);
+        // Interpolate fog color from deep rich marine teal to dark abyss midnight blue
+        const shallowWaterFog = new THREE.Color(0x002c3d);
+        const deepWaterFog = new THREE.Color(0x00050d);
         const interpolatedFogColor = shallowWaterFog.clone().lerp(deepWaterFog, depthFactor);
+
+        // Keep both fog and background strictly matching to eliminate any bright horizon or distance contrast
         scene.fog.color.copy(interpolatedFogColor);
+        scene.background.copy(interpolatedFogColor);
  
-        // Linear fog range for water: keeps realistic visibility (120m near surface, 50m in depth)
-        scene.fog.near = 5.0;
-        scene.fog.far = 120.0 - 70.0 * depthFactor;
+        // Underwater visibility range: 100m near surface down to 40m in deep abyss
+        scene.fog.near = 4.0;
+        scene.fog.far = 100.0 - 60.0 * depthFactor;
  
-        // Interpolate exposure from bright noon (1.15) to very dark underwater (0.25)
-        renderer.toneMappingExposure = 1.15 - (1.15 - 0.25) * depthFactor;
+        // Controlled underwater exposure: eliminates harsh sunlight glare in the distance
+        renderer.toneMappingExposure = 0.85 - (0.85 - 0.20) * depthFactor;
 
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.38;
+            water.material.uniforms['alpha'].value = 0.70;
         }
     } else {
+        // Restore sky dome and clouds above water
+        if (sky) sky.visible = true;
+        if (clouds) {
+            for (let i = 0; i < clouds.length; i++) clouds[i].visible = true;
+        }
+
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
         }
         
         scene.fog.color.copy(currentFogColor);
+        scene.background.copy(currentFogColor);
+
         // From 1.1km up, the atmosphere thins completely (fog recedes to 45km for crystal-clear view of islands and ocean)
         scene.fog.near = 250.0 + (10000.0 - 250.0) * altFactor;
         scene.fog.far = 600.0 + (45000.0 - 600.0) * altFactor;
