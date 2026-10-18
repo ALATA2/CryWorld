@@ -64,7 +64,7 @@ let bgMusic = null;
 const BGM_TARGET_VOLUME = 0.20; // Volume ambientale non troppo forte (20%)
 let bgmCurrentVolume = 0.0;
 let bgmPlaying = false;
-let bgmMuted = false;
+let bgmMuted = (typeof localStorage !== 'undefined' && localStorage.getItem('cryworld_music_muted') === '1');
 
 // FPS counting variables
 let fpsLastTime = performance.now();
@@ -472,13 +472,41 @@ function init() {
         }
     });
 
-    // ESC Confirmation dialog button handlers
+    // ESC Pause dialog button handlers
     const escConfirm = document.getElementById('esc-confirm');
-    document.getElementById('btn-confirm-no').addEventListener('click', () => {
+    const resumeGame = () => {
         escConfirm.classList.add('hidden');
         controls.lock(); // return to game
         startBackgroundMusic();
-    });
+    };
+
+    const btnPauseResume = document.getElementById('btn-pause-resume');
+    if (btnPauseResume) btnPauseResume.addEventListener('click', resumeGame);
+
+    const btnConfirmNo = document.getElementById('btn-confirm-no');
+    if (btnConfirmNo) btnConfirmNo.addEventListener('click', resumeGame);
+
+    const btnPauseMusic = document.getElementById('btn-pause-music');
+    if (btnPauseMusic) {
+        btnPauseMusic.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMusicMute(true);
+            if (!bgmMuted && !bgmPlaying) {
+                startBackgroundMusic();
+            }
+        });
+    }
+
+    const btnHomeMusic = document.getElementById('btn-home-music');
+    if (btnHomeMusic) {
+        btnHomeMusic.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMusicMute(false);
+            if (!bgmMuted) {
+                startBackgroundMusic();
+            }
+        });
+    }
 
     document.getElementById('btn-confirm-yes').addEventListener('click', () => {
         escConfirm.classList.add('hidden');
@@ -830,6 +858,7 @@ function init() {
 
     // 7d. Background Ambient Music Setup
     initBackgroundMusic();
+    updateMusicHud();
 
     // 8. Event Listeners
     setupInputListeners();
@@ -887,9 +916,27 @@ function stopBackgroundMusic() {
     }
 }
 
-function toggleMusicMute() {
+let toastTimer = null;
+function showMusicToast(text) {
+    const toast = document.getElementById('music-toast');
+    if (!toast) return;
+    toast.textContent = text;
+    toast.classList.remove('hidden');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 2200);
+}
+
+function toggleMusicMute(showNotification = true) {
     bgmMuted = !bgmMuted;
+    try {
+        localStorage.setItem('cryworld_music_muted', bgmMuted ? '1' : '0');
+    } catch (e) {}
     updateMusicHud();
+    if (showNotification) {
+        showMusicToast(bgmMuted ? '🔇 Musica Disattivata' : '🎵 Musica Attivata');
+    }
     return bgmMuted;
 }
 
@@ -897,6 +944,9 @@ function updateMusicHud() {
     const musicIcon = document.getElementById('music-icon');
     const musicStatus = document.getElementById('music-status');
     const musicCard = document.getElementById('music-card');
+    const pauseMusicBtn = document.getElementById('btn-pause-music');
+    const homeMusicBtn = document.getElementById('btn-home-music');
+
     if (musicIcon && musicStatus) {
         if (bgmMuted) {
             musicIcon.textContent = '🔇';
@@ -906,6 +956,32 @@ function updateMusicHud() {
             musicIcon.textContent = '🎵';
             musicStatus.textContent = 'BGM: ON';
             if (musicCard) musicCard.style.color = '#80e5ff';
+        }
+    }
+
+    if (pauseMusicBtn) {
+        if (bgmMuted) {
+            pauseMusicBtn.innerHTML = '🔇 MUSICA: DISATTIVATA <span style="font-size:0.75rem; opacity:0.75;">(Premi M)</span>';
+            pauseMusicBtn.style.background = 'rgba(255, 75, 75, 0.15)';
+            pauseMusicBtn.style.borderColor = 'rgba(255, 75, 75, 0.5)';
+            pauseMusicBtn.style.color = '#ff9999';
+        } else {
+            pauseMusicBtn.innerHTML = '🎵 MUSICA: ATTIVA <span style="font-size:0.75rem; opacity:0.75;">(Premi M)</span>';
+            pauseMusicBtn.style.background = 'rgba(0, 210, 255, 0.15)';
+            pauseMusicBtn.style.borderColor = 'rgba(0, 210, 255, 0.5)';
+            pauseMusicBtn.style.color = '#80e5ff';
+        }
+    }
+
+    if (homeMusicBtn) {
+        if (bgmMuted) {
+            homeMusicBtn.innerHTML = '🔇 MUSICA: OFF';
+            homeMusicBtn.style.color = '#ff9999';
+            homeMusicBtn.style.borderColor = 'rgba(255, 75, 75, 0.4)';
+        } else {
+            homeMusicBtn.innerHTML = '🎵 MUSICA: ON';
+            homeMusicBtn.style.color = '#80e5ff';
+            homeMusicBtn.style.borderColor = 'rgba(0, 210, 255, 0.4)';
         }
     }
 }
@@ -1432,6 +1508,10 @@ function animate() {
                 if (Math.abs(lookDir.y) > 0.12) {
                     velocity.y += lookDir.y * direction.z * currentSpeed * 0.85 * delta;
                 }
+                // Gentle upward boost when pushing forward towards shore/island
+                if (direction.z > 0 && camera.position.y < localWaterLevel + 0.35) {
+                    velocity.y += 3.5 * delta;
+                }
             }
         }
 
@@ -1454,14 +1534,14 @@ function animate() {
             const newX = camera.position.x;
             const newZ = camera.position.z;
 
-            // Helper to resolve horizontal collision and auto-step up onto slopes/beaches/shores
-            const tryMoveHorizontal = (targetX, targetZ) => {
+            // Helper to resolve horizontal collision and auto-step / mantle up onto slopes/beaches/shores
+            const tryMoveHorizontal = (targetX, targetZ, fromX, fromZ) => {
                 const currentEyeY = camera.position.y;
                 const currentFeetY = currentEyeY - playerHeight;
 
                 // 1. First test: standard collision at current eye height
                 if (!terrain.isCylinderColliding(targetX, currentEyeY, targetZ, playerRadius, playerHeight)) {
-                    return true;
+                    return { success: true, x: targetX, z: targetZ };
                 }
 
                 // 2. If it collided, check if it's a climbable slope, beach shore, or step!
@@ -1475,16 +1555,45 @@ function animate() {
                     : Math.max(currentEyeY + 2.5, effectiveWaterLevel + 3.0);
                 
                 const groundAtTarget = terrain.getSurfaceHeight(new THREE.Vector3(targetX, searchStartY, targetZ), searchStartY);
-                const stepDiff = groundAtTarget - currentFeetY;
+
+                // Check ahead in movement direction to detect steep banks / trench edges
+                const dx = targetX - fromX;
+                const dz = targetZ - fromZ;
+                const moveDist = Math.sqrt(dx * dx + dz * dz);
+                const dirX = moveDist > 0.0001 ? (dx / moveDist) : 0;
+                const dirZ = moveDist > 0.0001 ? (dz / moveDist) : 0;
+
+                // Probe point at the leading edge of the player cylinder (0.50m ahead)
+                const probeX = targetX + dirX * 0.50;
+                const probeZ = targetZ + dirZ * 0.50;
+                let groundAtProbe = groundAtTarget;
+
+                if (moveDist > 0.0001) {
+                    const ceilingAtProbe = terrain.getCeilingHeight(new THREE.Vector3(probeX, currentEyeY, probeZ), 2.5);
+                    const probeSearchStartY = (ceilingAtProbe !== Infinity)
+                        ? Math.min(currentEyeY + 0.3, ceilingAtProbe - 0.2)
+                        : Math.max(currentEyeY + 2.5, effectiveWaterLevel + 3.0);
+                    groundAtProbe = terrain.getSurfaceHeight(new THREE.Vector3(probeX, probeSearchStartY, probeZ), probeSearchStartY);
+                }
+
+                // Best ground candidate: either right under target or the bank ahead
+                const bestGround = Math.max(groundAtTarget, groundAtProbe);
+                const stepDiff = bestGround - currentFeetY;
+                const maxShoreHeight = effectiveWaterLevel + 2.6; // Allows climbing onto island rim/canal banks up to 2.6m above water
 
                 let canStep = false;
+                let stepTargetPos = { x: targetX, z: targetZ };
+
                 if (isNearSurface) {
-                    // When swimming or wading near water:
-                    // Any beach slope, sandbar, canal edge, or island bank up to 2.8m above water level is climbable!
-                    const isShore = (groundAtTarget <= effectiveWaterLevel + 2.8) && (groundAtTarget >= currentFeetY - 0.5);
-                    const isStep = (stepDiff > 0 && stepDiff <= 2.8);
-                    if (isShore || isStep) {
+                    // Swimming or wading near water:
+                    // Any beach slope, sandbar, canal edge, or island bank up to 2.6m above water level is climbable!
+                    if (bestGround <= maxShoreHeight && bestGround >= currentFeetY - 0.5) {
                         canStep = true;
+                        // If there is a steep bank in front (bank ahead is significantly higher than center),
+                        // mantle directly onto the probe position on the bank!
+                        if (groundAtProbe > groundAtTarget + 0.25) {
+                            stepTargetPos = { x: probeX, z: probeZ };
+                        }
                     }
                 } else {
                     // Normal walking on land or diving deep underwater:
@@ -1495,37 +1604,42 @@ function animate() {
                 }
 
                 if (canStep) {
-                    const proposedEyeY = groundAtTarget + playerHeight;
-                    const maxAllowedEyeY = (ceilingAtTarget !== Infinity) ? (ceilingAtTarget - 0.25) : Infinity;
+                    const proposedEyeY = bestGround + playerHeight;
+                    const testX = stepTargetPos.x;
+                    const testZ = stepTargetPos.z;
+                    const ceilingAtTest = terrain.getCeilingHeight(new THREE.Vector3(testX, proposedEyeY, testZ), 2.5);
+                    const maxAllowedEyeY = (ceilingAtTest !== Infinity) ? (ceilingAtTest - 0.25) : Infinity;
 
                     if (proposedEyeY <= maxAllowedEyeY) {
                         // Check if the body cylinder is clear at the stepped-up eye height
-                        if (!terrain.isCylinderColliding(targetX, proposedEyeY, targetZ, playerRadius, playerHeight)) {
-                            // Clear! Auto-step up smoothly onto the shore / slope
+                        if (!terrain.isCylinderColliding(testX, proposedEyeY, testZ, playerRadius, playerHeight)) {
+                            // Clear! Auto-step / mantle up smoothly onto the shore / slope / bank
                             camera.position.y = Math.max(camera.position.y, proposedEyeY);
                             velocity.y = Math.max(0, velocity.y);
                             isGrounded = true;
-                            return true;
+                            return { success: true, x: testX, z: testZ };
                         }
                     }
                 }
 
                 // Actually blocked by a tall solid wall or low ceiling
-                return false;
+                return { success: false, x: fromX, z: fromZ };
             };
 
             // 1. Move along X
             let resolvedX = prevX;
-            if (tryMoveHorizontal(newX, prevZ)) {
-                resolvedX = newX;
+            const resX = tryMoveHorizontal(newX, prevZ, prevX, prevZ);
+            if (resX.success) {
+                resolvedX = resX.x;
             } else {
                 velocity.x = 0; // Wall hit on X
             }
 
             // 2. Move along Z
             let resolvedZ = prevZ;
-            if (tryMoveHorizontal(resolvedX, newZ)) {
-                resolvedZ = newZ;
+            const resZ = tryMoveHorizontal(resolvedX, newZ, resolvedX, prevZ);
+            if (resZ.success) {
+                resolvedZ = resZ.z;
             } else {
                 velocity.z = 0; // Wall hit on Z
             }

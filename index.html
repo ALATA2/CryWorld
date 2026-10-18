@@ -380,6 +380,34 @@
             transform: scale(1.05);
         }
 
+        /* In-Game Toast Notification */
+        .music-toast {
+            position: absolute;
+            top: 28px;
+            left: 50%;
+            transform: translateX(-50%) translateY(0);
+            background: rgba(11, 29, 40, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1.5px solid #00d2ff;
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 1rem;
+            padding: 10px 24px;
+            border-radius: 25px;
+            box-shadow: 0 8px 30px rgba(0, 210, 255, 0.35);
+            pointer-events: none;
+            z-index: 2000;
+            opacity: 1;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .music-toast.hidden {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-15px);
+            pointer-events: none;
+        }
+
         /* Survival Hotbar styling */
         #hotbar-container {
             display: flex;
@@ -623,26 +651,31 @@
     <!-- Fullscreen Underwater Overlay -->
     <div id="underwater-overlay" class="hidden"></div>
 
-    <!-- ESC Confirmation Modal (Are you sure?) -->
+    <!-- In-Game Notification Toast -->
+    <div id="music-toast" class="music-toast hidden"></div>
+
+    <!-- ESC Pause Menu Modal -->
     <div id="esc-confirm" class="hidden">
-        <div class="confirm-box">
-            <h3>ARE YOU SURE?</h3>
-            <p>Do you want to return to the main menu?</p>
-            <div class="confirm-buttons">
-                <button id="btn-confirm-yes" class="confirm-btn yes-btn">YES</button>
-                <button id="btn-confirm-no" class="confirm-btn no-btn">NO</button>
+        <div class="confirm-box" style="min-width: 320px; border-color: #00d2ff; box-shadow: 0 0 35px rgba(0, 210, 255, 0.35);">
+            <h3 style="color: #00d2ff; margin-bottom: 6px;">PAUSA</h3>
+            <p style="margin-bottom: 18px; color: #a5c7db; font-size: 0.92rem;">Opzioni di gioco</p>
+            <div class="confirm-buttons" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+                <button id="btn-pause-resume" class="play-btn" style="width: 100%; padding: 12px; font-size: 0.95rem; background: linear-gradient(135deg, #00d2ff, #0066ff); box-shadow: 0 4px 15px rgba(0, 150, 255, 0.4);">▶️ RIPRENDI GIOCO</button>
+                <button id="btn-pause-music" class="play-btn" style="width: 100%; padding: 12px; font-size: 0.95rem; background: rgba(0, 210, 255, 0.15); border: 1.5px solid #00d2ff; color: #80e5ff; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.2);">🎵 MUSICA: ON (Premi M)</button>
+                <button id="btn-confirm-yes" class="confirm-btn yes-btn" style="width: 100%; padding: 10px; font-size: 0.85rem; background: rgba(255, 60, 60, 0.2); border: 1px solid rgba(255, 60, 60, 0.4); color: #ff9999; box-shadow: none;">🚪 TORNA AL MENU</button>
             </div>
         </div>
     </div>
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.194</div>
+        <div id="homepage-version">V 0.195</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
             <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
                 <button class="play-btn">CLICCA PER GIOCARE</button>
+                <button id="btn-home-music" class="play-btn" style="background: rgba(255, 255, 255, 0.12); border: 1.5px solid rgba(0, 210, 255, 0.5); color: #80e5ff; font-size: 0.9rem; padding: 12px 18px;">🎵 MUSICA: ON</button>
                 <button class="play-btn" onclick="window.location.href='editor.html'" style="background: linear-gradient(135deg, #00b0ff, #0066ff); box-shadow: 0 6px 20px rgba(0, 150, 255, 0.45);">🛠️ LEVEL EDITOR 3D</button>
             </div>
             <div class="instructions-detail">
@@ -654,8 +687,8 @@
                     <li><span class="key">Click SX</span> &nbsp; <b>Scava</b> il terreno (Rimuovi voxel)</li>
                     <li><span class="key">Click DX</span> &nbsp; <b>Crea</b> il terreno (Aggiungi voxel)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Cambia equipaggiamento (Hotbar)</li>
-                    <li><span class="key">M</span> &nbsp; Musica ON / OFF</li>
-                    <li><span class="key">ESC</span> &nbsp; Menu di uscita / Pausa</li>
+                    <li><span class="key">M</span> &nbsp; Musica ON / OFF (oppure da menu Pausa ESC)</li>
+                    <li><span class="key">ESC</span> &nbsp; Menu di Pausa / Uscita</li>
                 </ul>
             </div>
         </div>
@@ -682,7 +715,7 @@
                 FPS: <span id="fps-counter">60</span>
             </div>
             <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
-                V 0.194
+                V 0.195
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>
