@@ -282,7 +282,7 @@ function init() {
             sunColor: 0xffdfaa, // Bright sunlight specular reflections
             waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
             distortionScale: 1.5,
-            alpha: 0.70, // Water transparency matching underwater level (0.70)
+            alpha: 0.98, // Opaque Caribbean ocean water on surface (non-transparent)
             fog: scene.fog !== undefined
         }
     );
@@ -351,9 +351,7 @@ function init() {
              }
          }
 
-         float viewDist = length(worldPosition.xyz - eye);
-         float distFade = smoothstep(15.0, 120.0, viewDist);
-         float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
+         float distAlpha = alpha;
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
          float distH = length(worldPosition.xz - cameraPos.xz);
@@ -1899,9 +1897,9 @@ function animate() {
         
         renderer.toneMappingExposure = 1.15;
 
-        // Set surface water transparency to match the underwater level (0.70)
+        // Outside water: fully opaque water (alpha = 0.98) so submerged terrain is not visible from above
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.70;
+            water.material.uniforms['alpha'].value = 0.98;
         }
     }
 
