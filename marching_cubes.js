@@ -105,6 +105,7 @@ class PerlinNoise {
 // ==========================================
 // TERRAIN HELPERS & STATIC ALLOCATIONS
 // ==========================================
+// 1. Tropical Island Lagoon & Coral Atolls
 const _sandColor = new THREE.Color(0xf0ebd8); // Soft warm white coral sand
 const _goldenSandColor = new THREE.Color(0xe0b970); // Warm golden sand for eastern islands
 const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
@@ -112,6 +113,45 @@ const _barrenColor = new THREE.Color(0x948366); // Dry, barren dirt/scrub for ea
 const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
 const _seabedColor = new THREE.Color(0x086b7c); // Rich tropical turquoise-blue seabed reef
 const _abyssRockColor = new THREE.Color(0x0c1b26); // Deep abyssal ocean basalt rock
+
+// 2. Continental Idyllic Beaches
+const _beachSandColor = new THREE.Color(0xf5dfa6); // Fine golden champagne beach sand
+
+// 3. Equatorial Continental Desert
+const _desertSandColor = new THREE.Color(0xe09f45); // Golden-orange Saharan dune sand
+const _desertRockColor = new THREE.Color(0xb25d3a); // Sun-baked terracotta & canyon sandstone
+const _desertPlateauColor = new THREE.Color(0xd28646); // Arid plateau / clay
+
+// 4. Temperate Woods & Forests
+const _forestGrassColor = new THREE.Color(0x27ae60); // Vibrant forest green meadow
+const _forestDeepColor = new THREE.Color(0x196f3d);  // Deep woodland canopy and moss
+
+// 5. Alpine Pastures (Alpeggi) & High Mountain Crags
+const _alpineMeadowColor = new THREE.Color(0x55efc4); // Luminous fresh emerald alpine meadow
+const _alpineFloraColor = new THREE.Color(0x7bed9f);  // Wildflower alpine pasture turf
+const _graniteMountainColor = new THREE.Color(0x636e72); // Cold granite ridge rock
+const _darkMountainColor = new THREE.Color(0x2d3436); // Sharp slate / mountain spine rock
+
+// 6. Polar Ice Caps & Glaciers
+const _polarSnowColor = new THREE.Color(0xf8fafc); // Pure sparkling snow white
+const _glacierIceColor = new THREE.Color(0x70d6ff); // Crystalline turquoise-cyan glacial ice
+const _deepGlacierColor = new THREE.Color(0x00b4d8); // Deep compacted blue glacial ice
+const _polarRockColor = new THREE.Color(0x334155); // Cold frosted slate rock
+const _polarSeabedColor = new THREE.Color(0x133854); // Icy polar fjord seabed
+
+const _tempBiomeInfo = {
+    type: 'tropical',
+    name: '🏝️ ATOLLO E LAGUNA TROPICALE',
+    isGlacier: false,
+    isDesert: false,
+    isBeach: false,
+    isForest: false,
+    isAlpine: false,
+    isMountain: false,
+    isStartingEast: false,
+    latitude: 0.0,
+    contFactor: 0.0
+};
 
 const _vlist = Array.from({ length: 12 }, () => new THREE.Vector3());
 const _p0 = new THREE.Vector3();
@@ -157,63 +197,192 @@ function getNormalAt(terrain, vx, vy, vz, target) {
     return target.set(-dx / len, -dy / len, -dz / len).normalize();
 }
 
-function getColorAt(worldX, worldY, worldZ, normal, target) {
-    const slope = normal.y; // 1.0 = flat upwards, 0.0 = vertical wall
+function getColorAt(terrain, worldX, worldY, worldZ, normal, target) {
+    const slope = normal.y; // 1.0 = flat upwards, 0.0 = sheer vertical wall
     
-    // Check if we are in the eastern archipelago region (X > 250.0m, which is ~83 voxels)
-    const isEast = (worldX > 250.0);
+    const biome = terrain.getPlanetaryBiome(worldX, worldY, worldZ);
     
-    const sand = isEast ? _goldenSandColor : _sandColor;
-    const vegetation = isEast ? _barrenColor : _grassColor;
-    const rock = _rockColor;
-
-    if (slope < 0.60) {
-        // Very steep cliffs are always light grey granite rock
-        target.copy(rock);
-    } else {
-        // Maldives style beach (sea level is 120.0m) vs Golden Beach
-        if (worldY < 125.0) {
-            // Under sea level Y=120.0m
+    // 1. STARTING EASTERN ARCHIPELAGO
+    if (biome.isStartingEast) {
+        const sand = _goldenSandColor;
+        const vegetation = _barrenColor;
+        const rock = _rockColor;
+        if (slope < 0.60) {
+            target.copy(rock);
+        } else if (worldY < 125.0) {
             if (worldY < 120.0) {
-                // Seabed: fast transition from shoreline sand into deep coral turquoise / ocean reef
                 const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
                 target.lerpColors(sand, _seabedColor, depthFactor);
-                // Further down (into deep ocean and abyss), transition from turquoise reef to deep ocean basalt rock
-                if (worldY < 100.0) {
-                    const abyssFactor = Math.min(Math.max((100.0 - worldY) / 250.0, 0.0), 1.0);
-                    target.lerp(_abyssRockColor, abyssFactor * 0.75);
-                }
             } else {
                 target.copy(sand);
             }
         } else if (worldY < 128.0) {
-            // Beach to grass transition (125m to 128m)
-            const t = (worldY - 125.0) / 3.0;
-            target.lerpColors(sand, vegetation, t);
+            target.lerpColors(sand, vegetation, (worldY - 125.0) / 3.0);
         } else if (worldY < 155.0) {
-            // Vegetation slopes
             target.copy(vegetation);
         } else if (worldY < 165.0) {
-            // Vegetation to rock transition
-            const t = (worldY - 155.0) / 10.0;
-            target.lerpColors(vegetation, rock, t);
+            target.lerpColors(vegetation, rock, (worldY - 155.0) / 10.0);
         } else {
             target.copy(rock);
         }
-        
-        // Blend slopes that are slightly steep towards rock
-        if (slope < 0.75) {
-            const t = (0.75 - slope) / 0.15;
-            target.lerp(rock, t);
-        }
+        return target;
     }
-    
-    // Add subtle noise/shading variation
-    const noise = (Math.random() - 0.5) * 0.04;
-    target.r = Math.min(1.0, Math.max(0.0, target.r + noise));
-    target.g = Math.min(1.0, Math.max(0.0, target.g + noise));
-    target.b = Math.min(1.0, Math.max(0.0, target.b + noise));
-    
+
+    // 2. POLAR GLACIERS & ICE SHEETS (At the poles or high summits)
+    if (biome.isGlacier) {
+        if (worldY < 120.0) {
+            // Underwater polar seabed / submerged glacier foot
+            const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
+            target.lerpColors(_glacierIceColor, _polarSeabedColor, depthFactor);
+            if (worldY < 100.0) {
+                const abyssFactor = Math.min(Math.max((100.0 - worldY) / 250.0, 0.0), 1.0);
+                target.lerp(_abyssRockColor, abyssFactor * 0.75);
+            }
+        } else {
+            // Above water glacier: ice cliffs, crevasses, and pure snow fields
+            if (slope < 0.35) {
+                // Sheer vertical walls: frosted dark polar rock
+                target.copy(_polarRockColor);
+            } else if (slope < 0.65) {
+                // Sloped ice falls: crystalline turquoise glacial ice transitioning to deep blue
+                const t = (slope - 0.35) / 0.30;
+                target.lerpColors(_deepGlacierColor, _glacierIceColor, t);
+            } else {
+                // Gentle slopes and flat domes: fresh sparkling snow with subtle glacial cyan tint
+                const t = Math.min(1.0, (slope - 0.65) / 0.25);
+                target.lerpColors(_glacierIceColor, _polarSnowColor, t);
+            }
+        }
+        return target;
+    }
+
+    // 3. EQUATORIAL CONTINENTAL DESERT
+    if (biome.isDesert) {
+        if (worldY < 120.0) {
+            const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
+            target.lerpColors(_desertSandColor, _seabedColor, depthFactor);
+            if (worldY < 100.0) {
+                const abyssFactor = Math.min(Math.max((100.0 - worldY) / 250.0, 0.0), 1.0);
+                target.lerp(_abyssRockColor, abyssFactor * 0.75);
+            }
+        } else {
+            if (slope < 0.50) {
+                // Vertical canyon walls and mesa cliffs: terracotta red sandstone
+                target.copy(_desertRockColor);
+            } else if (slope < 0.72) {
+                // Canyon slopes: blend from rock to baked clay plateau
+                const t = (slope - 0.50) / 0.22;
+                target.lerpColors(_desertRockColor, _desertPlateauColor, t);
+            } else {
+                // Rolling golden-orange dunes and arid basins
+                const t = (slope - 0.72) / 0.28;
+                target.lerpColors(_desertPlateauColor, _desertSandColor, t);
+            }
+        }
+        return target;
+    }
+
+    // 4. UNDERWATER SEABED & REEF FOR ALL OTHER BIOMES
+    if (worldY < 120.0) {
+        const sand = biome.isBeach ? _beachSandColor : _sandColor;
+        const depthFactor = Math.min(Math.max((120.0 - worldY) / 8.0, 0.0), 1.0);
+        target.lerpColors(sand, _seabedColor, depthFactor);
+        if (worldY < 100.0) {
+            const abyssFactor = Math.min(Math.max((100.0 - worldY) / 250.0, 0.0), 1.0);
+            target.lerp(_abyssRockColor, abyssFactor * 0.75);
+        }
+        return target;
+    }
+
+    // 5. IDYLLIC BEACH (Continental coast)
+    if (biome.isBeach || (worldY < 125.0 && slope >= 0.55)) {
+        const beachSand = biome.isBeach ? _beachSandColor : _sandColor;
+        if (worldY < 125.0) {
+            target.copy(beachSand);
+        } else if (worldY < 128.0) {
+            const t = (worldY - 125.0) / 3.0;
+            const veg = biome.isForest ? _forestGrassColor : _grassColor;
+            target.lerpColors(beachSand, veg, t);
+        } else {
+            target.copy(biome.isForest ? _forestGrassColor : _grassColor);
+        }
+        if (slope < 0.60) {
+            target.lerp(_rockColor, (0.60 - slope) / 0.20);
+        }
+        return target;
+    }
+
+    // 6. ALPINE PASTURES (Alpeggi) & HIGH MOUNTAINS
+    if (biome.isAlpine) {
+        if (slope < 0.55) {
+            // Steep mountain slopes: cold granite
+            target.copy(_graniteMountainColor);
+        } else {
+            // High altitude meadows: luminous emerald green alpine pastures
+            const t = Math.min(1.0, (worldY - 150.0) / 25.0);
+            target.lerpColors(_forestGrassColor, _alpineMeadowColor, t);
+            // Wildflower accents on gentler high slopes
+            if (slope > 0.85) {
+                target.lerp(_alpineFloraColor, 0.35);
+            }
+        }
+        return target;
+    }
+
+    // 7. CONTINENTAL INTERIOR MOUNTAIN RIDGES & HIGH PEAKS
+    if (biome.isMountain) {
+        if (worldY >= 215.0 && slope >= 0.55) {
+            // Summit snow and eternal ice caps on soaring peaks
+            target.copy(_polarSnowColor);
+        } else if (slope < 0.65) {
+            target.copy(_darkMountainColor);
+        } else {
+            target.copy(_graniteMountainColor);
+        }
+        return target;
+    }
+
+    // 8. TEMPERATE FORESTS & WOODS
+    if (biome.isForest) {
+        if (slope < 0.58) {
+            target.copy(_rockColor);
+        } else {
+            const t = Math.min(1.0, (worldY - 126.0) / 24.0);
+            target.lerpColors(_forestGrassColor, _forestDeepColor, t * 0.7);
+        }
+        if (slope < 0.75) {
+            const t = (0.75 - slope) / 0.17;
+            target.lerp(_rockColor, t);
+        }
+        return target;
+    }
+
+    // 9. TROPICAL LAGOON & ATOLL (Default)
+    const sand = _sandColor;
+    const vegetation = _grassColor;
+    const rock = _rockColor;
+
+    if (slope < 0.60) {
+        target.copy(rock);
+    } else if (worldY < 125.0) {
+        target.copy(sand);
+    } else if (worldY < 128.0) {
+        const t = (worldY - 125.0) / 3.0;
+        target.lerpColors(sand, vegetation, t);
+    } else if (worldY < 155.0) {
+        target.copy(vegetation);
+    } else if (worldY < 165.0) {
+        const t = (worldY - 155.0) / 10.0;
+        target.lerpColors(vegetation, rock, t);
+    } else {
+        target.copy(rock);
+    }
+
+    if (slope < 0.75) {
+        const t = (0.75 - slope) / 0.15;
+        target.lerp(rock, t);
+    }
+
     return target;
 }
 
@@ -373,13 +542,13 @@ class VoxelChunk {
 
                         // Colors
                         _tempNormal.set(n0x, n0y, n0z);
-                        getColorAt(pt0.x * voxelScale, pt0.y * voxelScale, pt0.z * voxelScale, _tempNormal, _tempColor0);
+                        getColorAt(terrain, pt0.x * voxelScale, pt0.y * voxelScale, pt0.z * voxelScale, _tempNormal, _tempColor0);
                         
                         _tempNormal.set(n1x, n1y, n1z);
-                        getColorAt(pt1.x * voxelScale, pt1.y * voxelScale, pt1.z * voxelScale, _tempNormal, _tempColor1);
+                        getColorAt(terrain, pt1.x * voxelScale, pt1.y * voxelScale, pt1.z * voxelScale, _tempNormal, _tempColor1);
                         
                         _tempNormal.set(n2x, n2y, n2z);
-                        getColorAt(pt2.x * voxelScale, pt2.y * voxelScale, pt2.z * voxelScale, _tempNormal, _tempColor2);
+                        getColorAt(terrain, pt2.x * voxelScale, pt2.y * voxelScale, pt2.z * voxelScale, _tempNormal, _tempColor2);
 
                         // Push geometries scaled to physical meters
                         positions.push(
@@ -436,14 +605,32 @@ export class VoxelTerrain {
         // Vertical voxel range:
         // Sea level is at y = 40 (world Y = 120.0m).
         // 512m deep ocean floor reaches world Y = 120.0 - 512.0 = -392.0m (voxel y = -131).
-        // Island summits reach up to world Y = 192.0m (voxel y = 64).
+        // Continental mountain summits reach up to world Y = 264.0m (voxel y = 88).
         this.minY = -131;
-        this.maxY = 64;
+        this.maxY = 88;
         this.minWorldY = this.minY * this.voxelScale; // -393.0m
-        this.maxWorldY = this.maxY * this.voxelScale; // 192.0m
+        this.maxWorldY = this.maxY * this.voxelScale; // 264.0m
         this.minChunkY = Math.floor(this.minY / this.chunkSize); // -9
-        this.maxChunkY = Math.ceil(this.maxY / this.chunkSize);  // 4
+        this.maxChunkY = Math.ceil(this.maxY / this.chunkSize);  // 6
         this.chunksY = this.maxChunkY - this.minChunkY;
+
+        // Planetary Earth-like Generation Variables (Fully Configurable)
+        this.planetaryConfig = {
+            planetRadiusKm: 1800,           // Planet radius in kilometers
+            equatorZ: 0,                    // Z-coordinate of Equator
+            poleDistanceMeters: 32000,      // Distance from Equator to Polar Ice Caps (meters)
+            continentFrequency: 0.00015,    // Scale of macro-continents (lower = larger continents)
+            continentThreshold: 0.08,       // Continent vs Ocean sea level threshold
+            mountainRidgeFrequency: 0.0007, // Density of interior continental mountain ranges
+            beachWidth: 0.14,               // Continental beach span factor (creates wide idyllic beaches)
+            maxMountainElevation: 32.0,     // Max extra height of interior mountain ranges (voxels, ~96m)
+            polarIceDomeHeight: 22.0,       // Max height of polar glacier domes (voxels, ~66m)
+            enableContinents: true,         // Toggle continental landmasses
+            enableDeserts: true,            // Toggle equatorial continental deserts
+            enableGlaciers: true,           // Toggle polar ice sheets and mountain glaciers
+            enableAlpine: true,             // Toggle alpine meadows & pastures (alpeggi)
+            enableForests: true             // Toggle temperate forests & woodlands
+        };
 
         // Core terrain material with Vertex Colors and flat low-poly shading
         this.material = new THREE.MeshStandardMaterial({
@@ -519,6 +706,198 @@ export class VoxelTerrain {
         }
     }
 
+    getPlanetaryBiome(worldX, worldY, worldZ) {
+        const vx = worldX / this.voxelScale;
+        const vz = worldZ / this.voxelScale;
+        const wy = worldY;
+
+        // Reset temporary struct
+        _tempBiomeInfo.isGlacier = false;
+        _tempBiomeInfo.isDesert = false;
+        _tempBiomeInfo.isBeach = false;
+        _tempBiomeInfo.isForest = false;
+        _tempBiomeInfo.isAlpine = false;
+        _tempBiomeInfo.isMountain = false;
+        _tempBiomeInfo.isStartingEast = false;
+
+        // Protected starting archipelago
+        const distFromCenter = Math.sqrt(vx * vx + vz * vz);
+        const dxEast = vx - 220.0;
+        const dzEast = vz - 20.0;
+        const distFromEastArchi = Math.sqrt(dxEast * dxEast * 0.7 + dzEast * dzEast * 0.4);
+
+        if (distFromCenter < 180.0) {
+            _tempBiomeInfo.type = 'lagoon_atoll';
+            _tempBiomeInfo.name = '🏝️ ATOLLO E LAGUNA TROPICALE';
+            return _tempBiomeInfo;
+        }
+        if (distFromEastArchi < 240.0) {
+            _tempBiomeInfo.type = 'starting_east';
+            _tempBiomeInfo.name = '🏜️ ARCIPELAGO ORIENTALE';
+            _tempBiomeInfo.isStartingEast = true;
+            return _tempBiomeInfo;
+        }
+
+        const poleDist = (this.planetaryConfig && this.planetaryConfig.poleDistanceMeters) ? this.planetaryConfig.poleDistanceMeters : 32000.0;
+        const lat = Math.min(1.0, Math.abs(worldZ) / poleDist);
+        _tempBiomeInfo.latitude = lat;
+
+        // Continental noise
+        const freq = (this.planetaryConfig && this.planetaryConfig.continentFrequency) ? this.planetaryConfig.continentFrequency : 0.00015;
+        const c1 = this.noise.noise2d(vx * freq, vz * freq);
+        const c2 = this.noise.noise2d(vx * freq * 3.3, vz * freq * 3.3) * 0.35;
+        const c3 = this.noise.noise2d(vx * freq * 11.0, vz * freq * 11.0) * 0.12;
+        const contRaw = c1 + c2 + c3;
+        const thresh = (this.planetaryConfig && this.planetaryConfig.continentThreshold) ? this.planetaryConfig.continentThreshold : 0.08;
+        const beachSpan = (this.planetaryConfig && this.planetaryConfig.beachWidth) ? this.planetaryConfig.beachWidth : 0.14;
+
+        if (contRaw < thresh) {
+            // Oceanic region & islands
+            if (lat >= 0.75) {
+                _tempBiomeInfo.type = 'polar_ocean';
+                _tempBiomeInfo.name = '❄️ OCEANO POLARE & SCOGLI DI GHIACCIO';
+                _tempBiomeInfo.isGlacier = true;
+            } else if (lat < 0.25) {
+                _tempBiomeInfo.type = 'tropical_ocean';
+                _tempBiomeInfo.name = '🏝️ OCEANO TROPICALE & ATOLLI';
+            } else {
+                _tempBiomeInfo.type = 'open_ocean';
+                _tempBiomeInfo.name = '🌊 OCEANO APERTO & ISOLE';
+            }
+            return _tempBiomeInfo;
+        }
+
+        // Continental landmass
+        const contFactor = Math.min(1.0, (contRaw - thresh) / 0.35);
+        _tempBiomeInfo.contFactor = contFactor;
+
+        // 1. Polar Glaciers & Ice Sheets
+        if (lat >= 0.70) {
+            _tempBiomeInfo.type = 'glacier';
+            _tempBiomeInfo.name = '❄️ CALOTTA GLACIALE POLARE';
+            _tempBiomeInfo.isGlacier = true;
+            return _tempBiomeInfo;
+        }
+
+        // 2. Equatorial Continental Interior Desert
+        if (lat <= 0.25 && contFactor > 0.32) {
+            _tempBiomeInfo.type = 'desert';
+            _tempBiomeInfo.name = '🏜️ GRANDE DESERTO EQUATORIALE';
+            _tempBiomeInfo.isDesert = true;
+            return _tempBiomeInfo;
+        }
+
+        // 3. Continental Idyllic Beach
+        if (contRaw < (thresh + beachSpan) && wy < 127.5) {
+            _tempBiomeInfo.type = 'beach';
+            _tempBiomeInfo.name = '🏖️ SPIAGGIA CONTINENTALE IDILLIACA';
+            _tempBiomeInfo.isBeach = true;
+            return _tempBiomeInfo;
+        }
+
+        // 4. Continental Altitude Zonation:
+        // Mountain Peaks & Summit Glaciers
+        if (wy >= 210.0 || (wy >= 185.0 && lat > 0.48)) {
+            _tempBiomeInfo.type = 'summit_glacier';
+            _tempBiomeInfo.name = '🏔️ VETTA GLACIALE & NEVI PERENNI';
+            _tempBiomeInfo.isGlacier = true;
+            return _tempBiomeInfo;
+        }
+        if (wy >= 175.0) {
+            _tempBiomeInfo.type = 'mountain';
+            _tempBiomeInfo.name = '⛰️ CATENA MONTUOSA & CRESTE';
+            _tempBiomeInfo.isMountain = true;
+            return _tempBiomeInfo;
+        }
+        // Alpine Pastures (Alpeggi)
+        if (wy >= 150.0) {
+            _tempBiomeInfo.type = 'alpine';
+            _tempBiomeInfo.name = '🌱 ALPEGGI & PASCOLI ALPINI';
+            _tempBiomeInfo.isAlpine = true;
+            return _tempBiomeInfo;
+        }
+        // Temperate Woods & Forests
+        _tempBiomeInfo.type = 'forest';
+        _tempBiomeInfo.name = '🌲 FORESTA TEMPERATA & BOSCHI';
+        _tempBiomeInfo.isForest = true;
+        return _tempBiomeInfo;
+    }
+
+    getPlanetaryAtmosphereColor(worldX, worldY, worldZ) {
+        const biome = this.getPlanetaryBiome(worldX, worldY, worldZ);
+        if (biome.isGlacier) {
+            return new THREE.Color(0xd0e8f2); // Crisp, icy polar atmospheric mist
+        }
+        if (biome.isDesert) {
+            return new THREE.Color(0xf6e2c3); // Warm golden-amber desert haze
+        }
+        return new THREE.Color(0x8ce3ff); // Standard bright turquoise Caribbean / azure sky
+    }
+
+    getContinentalLand(x, z) {
+        if (!this.planetaryConfig || !this.planetaryConfig.enableContinents) {
+            return { weight: 0.0, hill: 0.0 };
+        }
+
+        const wz = z * this.voxelScale;
+        const lat = Math.min(1.0, Math.abs(wz) / this.planetaryConfig.poleDistanceMeters);
+
+        const freq = this.planetaryConfig.continentFrequency;
+        const c1 = this.noise.noise2d(x * freq, z * freq);
+        const c2 = this.noise.noise2d(x * freq * 3.3, z * freq * 3.3) * 0.35;
+        const c3 = this.noise.noise2d(x * freq * 11.0, z * freq * 11.0) * 0.12;
+        const contRaw = c1 + c2 + c3;
+
+        const thresh = this.planetaryConfig.continentThreshold;
+        if (contRaw < thresh) {
+            return { weight: 0.0, hill: 0.0 };
+        }
+
+        const beachSpan = this.planetaryConfig.beachWidth;
+        const shoreT = Math.min(1.0, (contRaw - thresh) / beachSpan);
+        const inlandT = Math.max(0.0, (contRaw - (thresh + beachSpan)) / 0.35);
+
+        const contWeight = Math.min(1.0, shoreT * 1.25);
+
+        // 1. Idyllic gentle beach slope (Y=40 to 44.5)
+        let hill = Math.pow(shoreT, 2.0) * 4.5;
+
+        // 2. Rolling plains and forest lowlands
+        if (shoreT >= 1.0) {
+            const rollingHills = this.noise.noise2d(x * 0.012, z * 0.012) * 3.0 + 4.5;
+            hill = Math.max(hill, rollingHills);
+        }
+
+        // 3. Interior Mountain Ranges ("catene montuose nell'interno")
+        if (inlandT > 0.0) {
+            const mFreq = this.planetaryConfig.mountainRidgeFrequency;
+            const m1 = 1.0 - Math.abs(this.noise.noise2d(x * mFreq, z * mFreq));
+            const m2 = this.noise.noise2d(x * mFreq * 3.5, z * mFreq * 3.5) * 0.35;
+            const mRidge = Math.max(0.0, (m1 + m2 - 0.30) / 0.70);
+            if (mRidge > 0.0) {
+                const mountainRise = Math.pow(mRidge, 1.6) * this.planetaryConfig.maxMountainElevation * inlandT;
+                hill += mountainRise;
+            }
+        }
+
+        // 4. Equatorial Desert Dunes
+        if (lat < 0.25 && inlandT > 0.20 && this.planetaryConfig.enableDeserts) {
+            const dune = Math.sin(x * 0.035 + Math.cos(z * 0.018) * 2.2) * 2.8 + Math.sin(z * 0.05) * 1.2;
+            hill = Math.max(hill, 5.0 + dune);
+        }
+
+        // 5. Polar Glaciers & Ice Domes
+        if (lat >= 0.70 && this.planetaryConfig.enableGlaciers) {
+            const polarDome = Math.pow((lat - 0.70) / 0.30, 1.3) * this.planetaryConfig.polarIceDomeHeight * Math.min(1.0, shoreT * 1.5);
+            hill += polarDome;
+        }
+
+        return {
+            weight: contWeight,
+            hill: hill
+        };
+    }
+
     getGlobalProceduralLand(x, z) {
         // Exclude the starting archipelago zone to keep the initial islands pristine
         const distFromCenter = Math.sqrt(x * x + z * z);
@@ -538,14 +917,16 @@ export class VoxelTerrain {
             return { weight: 0.0, hill: 0.0 };
         }
 
+        // Continental landmasses
+        const cont = this.getContinentalLand(x, z);
+        let maxWeight = cont.weight;
+        let maxHill = cont.hill;
+
         // Planetary infinite cellular grid for procedural islands
         // Cell size = 260 voxels (780 meters)
         const cellSize = 260.0;
         const cellX = Math.floor(x / cellSize);
         const cellZ = Math.floor(z / cellSize);
-
-        let maxWeight = 0.0;
-        let maxHill = 0.0;
 
         // Check the 3x3 neighborhood of cells
         for (let ox = -1; ox <= 1; ox++) {

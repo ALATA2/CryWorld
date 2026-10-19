@@ -1799,8 +1799,13 @@ function animate() {
             camera.updateProjectionMatrix();
         }
 
-        // 4. Update HUD Coordinates (meters scaled)
+        // 4. Update HUD Coordinates (meters scaled) & Planetary Biome
         posInfo.textContent = `X: ${Math.round(camera.position.x)} Y: ${Math.round(camera.position.y - 120.0)} Z: ${Math.round(camera.position.z)}`;
+        const biomeElem = document.getElementById('biome-info');
+        if (biomeElem && terrain && terrain.getPlanetaryBiome) {
+            const currentBiome = terrain.getPlanetaryBiome(camera.position.x, camera.position.y, camera.position.z);
+            biomeElem.textContent = currentBiome.name;
+        }
     }
 
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
@@ -1826,8 +1831,14 @@ function animate() {
         starIntensity = Math.min(Math.max((altitude - 350.0) / 750.0, 0.0), 1.0);
     }
     
+    // Planetary Atmosphere color modulation by latitude & biome
+    let baseAtmosphere = new THREE.Color(0x8ce3ff);
+    if (terrain && terrain.getPlanetaryAtmosphereColor) {
+        baseAtmosphere = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
+    }
+
     const skyTopColor = new THREE.Color(0x0078d7);
-    const skyBottomColor = new THREE.Color(0x8ce3ff);
+    const skyBottomColor = baseAtmosphere;
     const spaceColor = new THREE.Color(0x000002); // Deep black space
  
     // Interpolate sky colors based on altitude
@@ -1842,7 +1853,7 @@ function animate() {
         }
     }
  
-    const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
+    const currentFogColor = baseAtmosphere.clone().lerp(spaceColor, altFactor);
  
     if (isLookingFromBelow) {
         // Completely hide the sky dome and clouds while underwater so no daylight sky/horizon leaks through
