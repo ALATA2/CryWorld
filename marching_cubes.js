@@ -478,7 +478,7 @@ export class VoxelTerrain {
         if (y < this.minY || y >= this.maxY) {
             return -1.0;
         }
-        if (x < -3666 || x > 3666 || z < -3666 || z > 3666) {
+        if (Math.abs(x) > 600000 || Math.abs(z) > 600000) {
             return -1.0;
         }
         
@@ -491,7 +491,7 @@ export class VoxelTerrain {
 
     setDensity(x, y, z, value) {
         if (y < this.minY || y >= this.maxY) return;
-        if (x < -3666 || x > 3666 || z < -3666 || z > 3666) return;
+        if (Math.abs(x) > 600000 || Math.abs(z) > 600000) return;
         
         const key = `${x},${y},${z}`;
         this.modifiedVoxels.set(key, value);
@@ -517,6 +517,174 @@ export class VoxelTerrain {
                 }
             }
         }
+    }
+
+    getGlobalProceduralLand(x, z) {
+        // Exclude the starting archipelago zone to keep the initial islands pristine
+        const distFromCenter = Math.sqrt(x * x + z * z);
+        const dxEast = x - 220.0;
+        const dzEast = z - 20.0;
+        const distFromEastArchi = Math.sqrt(dxEast * dxEast * 0.7 + dzEast * dzEast * 0.4);
+        
+        // Inside the starting archipelago protected zone
+        if (distFromCenter < 180.0 || distFromEastArchi < 240.0) {
+            return { weight: 0.0, hill: 0.0 };
+        }
+        
+        // Smooth transition mask between starting archipelago and infinite ocean
+        const transitionDist = Math.min(distFromCenter - 180.0, distFromEastArchi - 240.0);
+        const startAreaMask = Math.min(Math.max(transitionDist / 50.0, 0.0), 1.0);
+        if (startAreaMask <= 0.0) {
+            return { weight: 0.0, hill: 0.0 };
+        }
+
+        // Planetary infinite cellular grid for procedural islands
+        // Cell size = 260 voxels (780 meters)
+        const cellSize = 260.0;
+        const cellX = Math.floor(x / cellSize);
+        const cellZ = Math.floor(z / cellSize);
+
+        let maxWeight = 0.0;
+        let maxHill = 0.0;
+
+        // Check the 3x3 neighborhood of cells
+        for (let ox = -1; ox <= 1; ox++) {
+            for (let oz = -1; oz <= 1; oz++) {
+                const cx = cellX + ox;
+                const cz = cellZ + oz;
+
+                // Deterministic fast pseudo-random hash for this cell
+                // 32-bit integer arithmetic (zero allocation, instantaneous)
+                let h1 = ((cx * 374761393 + cz * 668265263 + 127412617) ^ 0x5bf03635);
+                h1 = Math.imul(h1 ^ (h1 >>> 13), 127412617);
+                const hasIsland = ((h1 ^ (h1 >>> 16)) >>> 0) / 4294967296.0;
+
+                // 35% of cells are open ocean channels between islands
+                if (hasIsland > 0.65) continue;
+
+                let h2 = ((cx * 668265263 + cz * 374761393 + 289133645) ^ 0x3d7b42a1);
+                h2 = Math.imul(h2 ^ (h2 >>> 13), 289133645);
+                const randX = ((h2 ^ (h2 >>> 16)) >>> 0) / 4294967296.0;
+
+                let h3 = ((cx * 127412617 + cz * 459123847 + 668265263) ^ 0x1f83c5e9);
+                h3 = Math.imul(h3 ^ (h3 >>> 13), 668265263);
+                const randZ = ((h3 ^ (h3 >>> 16)) >>> 0) / 4294967296.0;
+
+                let h4 = ((cx * 459123847 + cz * 127412617 + 374761393) ^ 0x7a2c9183);
+                h4 = Math.imul(h4 ^ (h4 >>> 13), 374761393);
+                const typeHash = ((h4 ^ (h4 >>> 16)) >>> 0) / 4294967296.0;
+
+                let h5 = ((cx * 289133645 + cz * 668265263 + 459123847) ^ 0x4e91b2c7);
+                h5 = Math.imul(h5 ^ (h5 >>> 13), 459123847);
+                const sizeHash = ((h5 ^ (h5 >>> 16)) >>> 0) / 4294967296.0;
+
+                // Island center inside the cell with natural jitter
+                const islandCenterX = (cx + 0.5 + (randX - 0.5) * 0.55) * cellSize;
+                const islandCenterZ = (cz + 0.5 + (randZ - 0.5) * 0.55) * cellSize;
+
+                const dx = x - islandCenterX;
+                const dz = z - islandCenterZ;
+                const distCenter = Math.sqrt(dx * dx + dz * dz);
+
+                // Add organic fractal shoreline noise
+                const shoreNoise = (this.noise.noise2d(x * 0.04, z * 0.04) * 8.0) +
+                                   (this.noise.noise2d(x * 0.10, z * 0.10) * 2.5);
+
+                let islandWeight = 0.0;
+                let islandHill = 0.0;
+
+                // TYPE 0: CORAL ATOLL WITH TURQUOISE LAGOON (typeHash < 0.25)
+                if (typeHash < 0.25) {
+                    const atollRadius = 45.0 + sizeHash * 35.0; // 45 to 80 voxels (135m to 240m radius)
+                    const ringDist = Math.abs(distCenter - atollRadius);
+                    const ringThickness = 18.0 + sizeHash * 8.0; // 18 to 26 voxels
+                    const atollDistWithNoise = ringDist + shoreNoise;
+                    
+                    if (atollDistWithNoise < ringThickness) {
+                        const t = 1.0 - atollDistWithNoise / ringThickness;
+                        islandWeight = Math.max(0.0, t);
+                        // Gentle sandy ring ridge
+                        islandHill = Math.max(islandHill, 9.0 * Math.pow(t, 1.3));
+                    }
+                    // Shallow coral lagoon inside the atoll ring
+                    if (distCenter < atollRadius) {
+                        const lagoonT = 1.0 - distCenter / atollRadius;
+                        islandWeight = Math.max(islandWeight, 0.40 * lagoonT);
+                    }
+                }
+                // TYPE 1: CONICAL VOLCANO ISLAND WITH CALDERA / CRATER (0.25 <= typeHash < 0.45)
+                else if (typeHash < 0.45) {
+                    const volcanoRadius = 50.0 + sizeHash * 35.0; // 50 to 85 voxels (150m to 255m radius)
+                    // Slightly stretch or tilt the volcano
+                    const stretchZ = (typeHash > 0.35) ? 0.75 : 1.15;
+                    const vDist = Math.sqrt(dx * dx + (dz * stretchZ) * (dz * stretchZ)) + shoreNoise;
+                    
+                    if (vDist < volcanoRadius) {
+                        const t = 1.0 - vDist / volcanoRadius;
+                        islandWeight = Math.max(0.0, t);
+                        // High conical volcanic elevation (up to 40m - 50m above base)
+                        let vHeight = 14.0 * Math.pow(t, 1.25);
+                        
+                        // Crater bowl depression at center
+                        const craterRadius = 12.0 + sizeHash * 6.0;
+                        if (vDist < craterRadius) {
+                            const craterT = 1.0 - vDist / craterRadius;
+                            vHeight -= 7.0 * Math.pow(craterT, 1.4);
+                        }
+                        islandHill = Math.max(islandHill, vHeight);
+                    }
+                }
+                // TYPE 2: MOUNTAINOUS ARCHIPELAGO / RIDGE CHAINS (0.45 <= typeHash < 0.80)
+                else if (typeHash < 0.80) {
+                    const archiRadius = 60.0 + sizeHash * 55.0; // 60 to 115 voxels (180m to 345m radius)
+                    // Ridge elongation along an angle
+                    const angle = sizeHash * Math.PI;
+                    const cosA = Math.cos(angle);
+                    const sinA = Math.sin(angle);
+                    const rotX = dx * cosA - dz * sinA;
+                    const rotZ = dx * sinA + dz * cosA;
+                    // Stretched along one axis to create natural island chains and mountain spines
+                    const mDist = Math.sqrt(rotX * rotX * 0.65 + rotZ * rotZ * 1.35) + shoreNoise;
+                    
+                    if (mDist < archiRadius) {
+                        const t = 1.0 - mDist / archiRadius;
+                        islandWeight = Math.max(0.0, t);
+                        
+                        // Rolling high peaks and mountain ridges with valleys
+                        const ridgeNoise = this.noise.noise2d(rotX * 0.04, rotZ * 0.04) * 5.0;
+                        const peakNoise = this.noise.noise2d(rotX * 0.08, rotZ * 0.08) * 2.5;
+                        const mHeight = Math.max(0.0, Math.pow(t, 1.2) * 16.0 + ridgeNoise + peakNoise);
+                        islandHill = Math.max(islandHill, mHeight);
+                    }
+                }
+                // TYPE 3: SCOGLI & FARAGLIONI / JAGGED SEA CRAGS (typeHash >= 0.80)
+                else {
+                    const cragRadius = 25.0 + sizeHash * 25.0; // 25 to 50 voxels (75m to 150m radius)
+                    const cDist = distCenter + shoreNoise * 1.4;
+                    
+                    if (cDist < cragRadius) {
+                        const t = 1.0 - cDist / cragRadius;
+                        // Sharp threshold for steep cliff walls rising out of the water
+                        islandWeight = Math.max(0.0, Math.pow(t, 0.7));
+                        // High spire crag
+                        const cragSpire = Math.pow(t, 1.1) * 12.0;
+                        islandHill = Math.max(islandHill, cragSpire);
+                    }
+                }
+
+                if (islandWeight > maxWeight) {
+                    maxWeight = islandWeight;
+                }
+                if (islandHill > maxHill) {
+                    maxHill = islandHill;
+                }
+            }
+        }
+
+        return {
+            weight: maxWeight * startAreaMask,
+            hill: maxHill * startAreaMask
+        };
     }
 
     getBaseDensity(x, y, z) {
@@ -573,8 +741,11 @@ export class VoxelTerrain {
         // Combine the three giant eastern islands
         const eastIslandWeight = Math.max(weightA, weightB, weightC);
         
-        // Combine land weights of atoll, volcano, and eastern islands
-        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight);
+        // 4. Global procedural infinite island generator beyond the starting archipelago
+        const globalLand = this.getGlobalProceduralLand(x, z);
+
+        // Combine land weights of atoll, volcano, eastern islands and infinite global islands
+        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
         
         // Smooth falloffs
         const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
@@ -613,6 +784,11 @@ export class VoxelTerrain {
             const hillNoise = this.noise.noise2d(x * 0.025, z * 0.025) * 2.5;
             const eHill = Math.max(0.0, t * 10.0 + hillNoise); // max elevation ~30m above base
             hillHeight = Math.max(hillHeight, eHill);
+        }
+
+        // Global procedural islands hill height
+        if (globalLand.hill > 0.0) {
+            hillHeight = Math.max(hillHeight, globalLand.hill);
         }
         
         let density = 0;
@@ -666,6 +842,7 @@ export class VoxelTerrain {
         const yTop = yBottom + this.chunkSize;
         const yMid = yBottom + this.chunkSize * 0.5;
 
+        if (this.getBaseDensity(midX, yBottom, midZ) > -0.92) return true;
         if (this.getBaseDensity(midX, yMid, midZ) > -0.92) return true;
         if (this.getBaseDensity(startX, yBottom, startZ) > -0.92) return true;
         if (this.getBaseDensity(endX, yBottom, startZ) > -0.92) return true;
@@ -717,7 +894,7 @@ export class VoxelTerrain {
             // Loop through chunks in a cylinder around player
             for (let cx = pcx - chunkRadius; cx <= pcx + chunkRadius; cx++) {
                 for (let cz = pcz - chunkRadius; cz <= pcz + chunkRadius; cz++) {
-                    if (cx < -229 || cx > 229 || cz < -229 || cz > 229) continue;
+                    if (Math.abs(cx) > 37500 || Math.abs(cz) > 37500) continue; // 1800km planetary globe boundary
                     
                     const dx = cx - pcx;
                     const dz = cz - pcz;
@@ -837,12 +1014,12 @@ export class VoxelTerrain {
         const rVox = Math.ceil(radius / this.voxelScale);
         let modified = false;
 
-        const xMin = Math.max(-3666, vx - rVox);
-        const xMax = Math.min(3666, vx + rVox);
+        const xMin = Math.max(-600000, vx - rVox);
+        const xMax = Math.min(600000, vx + rVox);
         const yMin = Math.max(this.minY + 1, vy - rVox); // Prevent digging below the ocean floor level
         const yMax = Math.min(this.maxY - 1, vy + rVox);
-        const zMin = Math.max(-3666, vz - rVox);
-        const zMax = Math.min(3666, vz + rVox);
+        const zMin = Math.max(-600000, vz - rVox);
+        const zMax = Math.min(600000, vz + rVox);
 
         for (let x = xMin; x <= xMax; x++) {
             for (let y = yMin; y <= yMax; y++) {
@@ -886,7 +1063,7 @@ export class VoxelTerrain {
         const fy = Math.floor(ly);
         const fz = Math.floor(lz);
 
-        if (fy < this.minY || fy >= this.maxY - 1 || fx < -3666 || fx >= 3666 || fz < -3666 || fz >= 3666) {
+        if (fy < this.minY || fy >= this.maxY - 1 || Math.abs(fx) > 600000 || Math.abs(fz) > 600000) {
             return wy <= this.minWorldY;
         }
 
@@ -1077,7 +1254,8 @@ export class VoxelTerrain {
         const weightC = Math.max(0.0, 1.0 - distC / 150.0);
         
         const eastIslandWeight = Math.max(weightA, weightB, weightC);
-        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight);
+        const globalLand = this.getGlobalProceduralLand(vx, vz);
+        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
         
         const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
         const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.5), 1.2);
@@ -1105,6 +1283,9 @@ export class VoxelTerrain {
             const hillNoise = this.noise.noise2d(vx * 0.025, vz * 0.025) * 2.5;
             const eHill = Math.max(0.0, t * 10.0 + hillNoise);
             hillHeight = Math.max(hillHeight, eHill);
+        }
+        if (globalLand.hill > 0.0) {
+            hillHeight = Math.max(hillHeight, globalLand.hill);
         }
         
         let estimatedY = 0;

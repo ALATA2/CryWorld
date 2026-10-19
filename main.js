@@ -311,7 +311,7 @@ function init() {
         `vec3 curvedPos = position;
          vec4 worldV = modelMatrix * vec4(position, 1.0);
          float distH = length(worldV.xz - cameraPos.xz);
-         float planetR = 2800.0;
+         float planetR = 1800000.0;
          if (distH < planetR) {
              float drop = planetR - sqrt(planetR * planetR - distH * distH);
              curvedPos.z -= drop;
