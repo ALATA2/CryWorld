@@ -282,7 +282,7 @@ function init() {
             sunColor: 0xffdfaa, // Bright sunlight specular reflections
             waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
             distortionScale: 1.5,
-            alpha: 0.85, // Balanced semi-transparent tropical water
+            alpha: 0.70, // Water transparency matching underwater level (0.70)
             fog: scene.fog !== undefined
         }
     );
@@ -354,10 +354,6 @@ function init() {
          float viewDist = length(worldPosition.xyz - eye);
          float distFade = smoothstep(15.0, 120.0, viewDist);
          float distAlpha = clamp(alpha + distFade * (1.0 - alpha) * 0.85, 0.0, 0.98);
-         if (eye.y < worldPosition.y) {
-             // Maintain water translucency from below so sky and distant islands are visible through water
-             distAlpha = clamp(alpha * 0.70 + distFade * 0.15, 0.15, 0.45);
-         }
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
          float distH = length(worldPosition.xz - cameraPos.xz);
@@ -1816,10 +1812,7 @@ function animate() {
     const underwaterOverlay = document.getElementById('underwater-overlay');
     const localWaterAtCamera = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
     const isLookingFromBelow = (camera.position.y < localWaterAtCamera);
-    const submergeDepth = Math.max(0.0, localWaterAtCamera - camera.position.y);
-    const depthFactor = Math.min(Math.max(submergeDepth / 80.0, 0.0), 1.0);
-    // diveFactor: 0.0 when swimming at the surface (submergeDepth <= 1.5m), scaling smoothly to 1.0 at 45m deep diving
-    const diveFactor = Math.min(Math.max((submergeDepth - 1.5) / 43.5, 0.0), 1.0);
+    const depthFactor = Math.min(Math.max((localWaterAtCamera - camera.position.y) / 80.0, 0.0), 1.0);
     
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
@@ -1854,48 +1847,37 @@ function animate() {
     const currentFogColor = new THREE.Color(0x8ce3ff).lerp(spaceColor, altFactor);
  
     if (isLookingFromBelow) {
-        // Sky dome and clouds stay visible so swimming at the surface or looking up reveals the sky, sun and islands through water
-        if (sky) sky.visible = true;
+        // Completely hide the sky dome and clouds while underwater so no daylight sky/horizon leaks through
+        if (sky) sky.visible = false;
         if (clouds) {
-            for (let i = 0; i < clouds.length; i++) clouds[i].visible = true;
+            for (let i = 0; i < clouds.length; i++) clouds[i].visible = false;
         }
 
         if (underwaterOverlay) {
             underwaterOverlay.classList.remove('hidden');
-            // Subtle water sheen: negligible at surface swimming (0.02), smoothly increasing in deep abyss
-            const baseOpacity = 0.02 + 0.16 * diveFactor;
-            const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.012 * diveFactor;
-            underwaterOverlay.style.background = `rgba(0, 45, 75, ${Math.max(0.0, wavePulse)})`;
+            const baseOpacity = 0.22 + 0.18 * depthFactor;
+            const wavePulse = baseOpacity + Math.sin(clock.getElapsedTime() * 1.6) * 0.02 * depthFactor;
+            underwaterOverlay.style.background = `rgba(0, 35, 60, ${Math.max(0.0, wavePulse)})`;
         }
+ 
+        // Interpolate fog color from deep rich marine teal to dark abyss midnight blue
+        const shallowWaterFog = new THREE.Color(0x002c3d);
+        const deepWaterFog = new THREE.Color(0x00050d);
+        const interpolatedFogColor = shallowWaterFog.clone().lerp(deepWaterFog, depthFactor);
 
-        // Color interpolation:
-        // At surface: light tropical horizon cyan/teal matching clear daylight sky
-        // Deep abyss: deep ocean midnight navy blue (eliminating all horizon glow)
-        const surfaceWaterFog = currentFogColor.clone().lerp(new THREE.Color(0x0a6885), 0.25);
-        const deepWaterFog = new THREE.Color(0x01121d);
-        const currentWaterFog = surfaceWaterFog.clone().lerp(deepWaterFog, diveFactor);
+        // Keep both fog and background strictly matching to eliminate any bright horizon or distance contrast
+        scene.fog.color.copy(interpolatedFogColor);
+        scene.background.copy(interpolatedFogColor);
+ 
+        // Underwater visibility range: 100m near surface down to 40m in deep abyss
+        scene.fog.near = 4.0;
+        scene.fog.far = 100.0 - 60.0 * depthFactor;
+ 
+        // Controlled underwater exposure: eliminates harsh sunlight glare in the distance
+        renderer.toneMappingExposure = 0.85 - (0.85 - 0.20) * depthFactor;
 
-        // Keep both fog and background strictly matching
-        scene.fog.color.copy(currentWaterFog);
-        scene.background.copy(currentWaterFog);
-
-        // Sky dome bottom color matches underwater fog so looking at distant horizon blends seamlessly
-        if (sky && sky.material && sky.material.uniforms) {
-            sky.material.uniforms['bottomColor'].value.copy(currentSkyBottom.clone().lerp(deepWaterFog, diveFactor));
-        }
-
-        // Visibility range:
-        // Surface swimming (depth <= 1.5m): 150m near to 600m far - distant islands and palm trees fully visible!
-        // Deep abyss (depth >= 45m): smoothly transitions to 15m near and 180m far - rich, atmospheric deep sea fog!
-        scene.fog.near = 150.0 - 135.0 * diveFactor;
-        scene.fog.far = 600.0 - 420.0 * diveFactor;
-
-        // Controlled underwater exposure: bright daylight at surface, gentle reduction in deep abyss
-        renderer.toneMappingExposure = 1.15 - 0.40 * diveFactor;
-
-        // Water surface from below remains clear and transparent so island and sky are visible through waves
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.35;
+            water.material.uniforms['alpha'].value = 0.70;
         }
     } else {
         // Restore sky dome and clouds above water
@@ -1917,8 +1899,9 @@ function animate() {
         
         renderer.toneMappingExposure = 1.15;
 
+        // Set surface water transparency to match the underwater level (0.70)
         if (water && water.material && water.material.uniforms['alpha']) {
-            water.material.uniforms['alpha'].value = 0.82;
+            water.material.uniforms['alpha'].value = 0.70;
         }
     }
 
