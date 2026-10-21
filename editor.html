@@ -2,18 +2,22 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CryWorld - 3D Map & Level Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CryWorld - 3D Sandbox Level Editor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: rgba(10, 18, 30, 0.90);
+            --bg-card: rgba(11, 29, 40, 0.75);
+            --bg-card-hover: rgba(16, 38, 54, 0.88);
+            --border-card: rgba(255, 255, 255, 0.15);
             --accent-cyan: #00d2ff;
+            --accent-orange: #ff7b00;
             --accent-green: #00e676;
-            --text-main: #f0f6fc;
-            --text-muted: #8b9bb4;
+            --accent-yellow: #ffeb3b;
+            --text-main: #ffffff;
+            --text-muted: rgba(255, 255, 255, 0.7);
         }
 
         * {
@@ -28,7 +32,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #040911;
+            background: #061117;
             font-family: 'Outfit', sans-serif;
             color: var(--text-main);
         }
@@ -39,279 +43,591 @@
             left: 0;
             width: 100%;
             height: 100%;
+            display: block;
             z-index: 1;
         }
 
-        /* Top Navigation Bar */
-        .top-nav {
+        /* Fullscreen UI container matching Gameplay */
+        #hud-container {
             position: absolute;
-            top: 16px;
-            left: 20px;
-            right: 20px;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        .hud-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            color: #ffffff;
+            padding: 10px 16px;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
+            transition: all 0.2s ease;
+        }
+
+        /* Top Header Row */
+        .hud-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            width: 100%;
             pointer-events: none;
         }
 
-        .nav-card {
-            background: var(--bg-dark);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 12px;
-            padding: 8px 16px;
+        .stats-card {
+            font-size: 13px;
+            font-weight: 600;
             display: flex;
             align-items: center;
             gap: 12px;
-            pointer-events: auto;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            font-family: monospace;
         }
 
-        .brand {
+        .stat-item {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-weight: 900;
-            font-size: 1.05rem;
+            gap: 6px;
+        }
+
+        .mode-badge {
+            background: rgba(255, 235, 59, 0.15);
+            border: 1px solid rgba(255, 235, 59, 0.4);
+            color: var(--accent-yellow);
+            font-weight: 800;
+            font-size: 0.76rem;
+            padding: 3px 8px;
+            border-radius: 6px;
             letter-spacing: 0.5px;
         }
 
-        .brand-badge {
-            background: linear-gradient(135deg, #00d2ff, #0077ff);
-            color: #021020;
-            font-size: 0.72rem;
-            font-weight: 800;
-            padding: 2px 7px;
-            border-radius: 5px;
-            text-transform: uppercase;
+        .hud-top-right {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            pointer-events: auto;
         }
 
-        .coord-pill {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            color: var(--accent-cyan);
-            background: rgba(0, 210, 255, 0.1);
-            border: 1px solid rgba(0, 210, 255, 0.25);
-            padding: 4px 8px;
-            border-radius: 6px;
-        }
-
-        .btn {
-            background: rgba(255, 255, 255, 0.08);
-            color: var(--text-main);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 8px;
-            padding: 7px 13px;
+        .action-btn {
+            background: var(--bg-card);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            color: #ffffff;
             font-family: 'Outfit', sans-serif;
-            font-weight: 700;
-            font-size: 0.84rem;
+            font-weight: 800;
+            font-size: 0.82rem;
+            padding: 8px 14px;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 6px;
-            transition: all 0.16s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.18s ease;
         }
 
-        .btn:hover {
-            background: rgba(255, 255, 255, 0.18);
+        .action-btn:hover {
+            transform: translateY(-2px);
             border-color: var(--accent-cyan);
-            transform: translateY(-1px);
+            background: var(--bg-card-hover);
         }
 
-        .btn-primary {
+        .action-btn.play-btn {
             background: linear-gradient(135deg, #00b0ff, #0066ff);
-            color: #ffffff;
-            border: none;
-            box-shadow: 0 4px 16px rgba(0, 150, 255, 0.4);
+            border-color: rgba(0, 210, 255, 0.6);
+            box-shadow: 0 4px 20px rgba(0, 150, 255, 0.45);
         }
 
-        .btn-success {
+        .action-btn.play-btn:hover {
+            box-shadow: 0 6px 25px rgba(0, 150, 255, 0.65);
+        }
+
+        .action-btn.save-btn {
             background: linear-gradient(135deg, #00c853, #009624);
-            color: #ffffff;
-            border: none;
-            box-shadow: 0 4px 16px rgba(0, 200, 83, 0.4);
+            border-color: rgba(0, 230, 118, 0.6);
+            box-shadow: 0 4px 20px rgba(0, 200, 83, 0.35);
         }
 
-        /* Left Tools Palette */
-        .tools-sidebar {
+        /* Center Gameplay Crosshair */
+        #crosshair {
             position: absolute;
-            left: 20px;
-            top: 76px;
-            z-index: 10;
-            background: var(--bg-dark);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            padding: 8px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            border-radius: 50%;
+            pointer-events: none;
+            transition: all 0.1s ease;
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
         }
 
-        .tool-btn {
-            width: 50px;
-            height: 50px;
-            border-radius: 10px;
+        #crosshair.active {
+            width: 14px;
+            height: 14px;
+            border-color: var(--accent-cyan);
+            background: rgba(0, 210, 255, 0.35);
+            box-shadow: 0 0 12px var(--accent-cyan);
+        }
+
+        /* Bottom Left HUD matching Gameplay */
+        .hud-bottom-left {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .fps-card {
+            font-size: 14px;
+            font-weight: 800;
+            color: #00ff88;
+            border-color: rgba(0, 255, 136, 0.3);
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
+            pointer-events: auto;
+        }
+
+        .version-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            color: #00d2ff;
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 0.82rem;
+            padding: 4px 10px;
+            border-radius: 8px;
+            backdrop-filter: blur(8px);
+            pointer-events: auto;
+        }
+
+        .altimeter-card {
+            font-size: 14px;
+            font-weight: 800;
+            color: #00e5ff;
+            border-color: rgba(0, 229, 255, 0.3);
+            text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .cam-mode-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            color: #ffeb3b;
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 0.82rem;
+            padding: 4px 10px;
+            border-radius: 8px;
+            backdrop-filter: blur(8px);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        /* Floating Brush Parameters Pill right above the Hotbar */
+        #brush-hud {
+            align-self: center;
+            margin-bottom: 8px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            background: rgba(11, 29, 40, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            border-radius: 20px;
+            padding: 6px 16px;
+            pointer-events: auto;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+        }
+
+        .brush-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+        }
+
+        .brush-val {
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 800;
+            min-width: 44px;
+            text-align: center;
+        }
+
+        .mini-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            border-radius: 5px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .mini-btn:hover {
+            background: rgba(0, 210, 255, 0.3);
+            border-color: var(--accent-cyan);
+        }
+
+        .pill-select {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 6px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .pill-select option {
+            background: #0b1d28;
+            color: #ffffff;
+        }
+
+        .brush-hint {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.6);
+            border-left: 1px solid rgba(255, 255, 255, 0.15);
+            padding-left: 12px;
+            font-family: monospace;
+        }
+
+        /* Survival Style Hotbar matching Gameplay */
+        #hotbar-container {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 5px;
+            align-self: center;
+            background: rgba(11, 29, 40, 0.75);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 8px 12px;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        .hotbar-slot {
+            width: 58px;
+            height: 58px;
             background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: var(--text-main);
-            font-size: 1.3rem;
+            border: 1.5px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            position: relative;
             cursor: pointer;
             transition: all 0.16s ease;
         }
 
-        .tool-btn .hotkey {
-            font-size: 0.60rem;
-            font-family: 'JetBrains Mono', monospace;
-            color: var(--text-muted);
-            margin-top: -2px;
+        .hotbar-slot:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(0, 210, 255, 0.5);
+            transform: translateY(-2px);
         }
 
-        .tool-btn:hover {
-            background: rgba(255, 255, 255, 0.14);
-            border-color: var(--accent-cyan);
-            transform: scale(1.04);
-        }
-
-        .tool-btn.active {
+        .hotbar-slot.active {
             background: rgba(0, 210, 255, 0.22);
             border-color: var(--accent-cyan);
-            box-shadow: 0 0 16px rgba(0, 210, 255, 0.4);
+            box-shadow: 0 0 16px rgba(0, 210, 255, 0.45);
+            transform: translateY(-3px);
         }
 
-        .tool-btn.active .hotkey {
+        .slot-num {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 10px;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.5);
+            font-family: monospace;
+        }
+
+        .hotbar-slot.active .slot-num {
             color: var(--accent-cyan);
         }
 
-        /* Brush Properties Panel */
-        .brush-panel {
+        .slot-icon {
+            font-size: 22px;
+            margin-top: 2px;
+        }
+
+        .slot-name {
+            font-size: 8px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 1px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .hotbar-slot.active .slot-name {
+            color: #ffffff;
+            font-weight: 800;
+        }
+
+        /* Initial Click-to-Play Blocker Overlay matching Gameplay */
+        #blocker {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(6, 17, 23, 0.88);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            cursor: pointer;
+            transition: opacity 0.4s ease;
+        }
+
+        #homepage-version {
             position: absolute;
             bottom: 20px;
             left: 20px;
-            z-index: 10;
-            background: var(--bg-dark);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            padding: 14px 18px;
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.4);
+            font-family: monospace;
+            letter-spacing: 1px;
+            pointer-events: none;
         }
 
-        .param-group {
+        #instructions {
+            text-align: center;
+            color: #ffffff;
+            padding: 30px;
+            max-width: 620px;
+        }
+
+        #instructions h2 {
+            font-size: 38px;
+            font-weight: 900;
+            margin: 0 0 8px 0;
+            background: linear-gradient(135deg, #00f0ff, #0072ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #instructions p.subtitle {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 0 0 32px 0;
+        }
+
+        .main-play-btn {
+            background: linear-gradient(90deg, #ff7b00, #ffae00);
+            border: none;
+            border-radius: 30px;
+            color: white;
+            padding: 14px 42px;
+            font-size: 18px;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 10px 25px rgba(255, 123, 0, 0.45);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #instructions:hover .main-play-btn {
+            transform: scale(1.05);
+            box-shadow: 0 12px 30px rgba(255, 123, 0, 0.65);
+        }
+
+        .instructions-detail {
+            margin-top: 30px;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px 24px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .instructions-detail ul {
+            margin: 8px 0 0 0;
+            padding-left: 20px;
+        }
+
+        .instructions-detail li {
+            margin-bottom: 6px;
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-bottom: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 800;
+            font-family: monospace;
+        }
+
+        /* In-Game Options / Pause Modal matching Gameplay */
+        #editor-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(6, 17, 23, 0.88);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 60;
+            transition: opacity 0.3s ease;
+        }
+
+        .confirm-box {
+            background: rgba(11, 29, 40, 0.95);
+            border: 2px solid var(--accent-cyan);
+            border-radius: 16px;
+            padding: 30px 40px;
+            text-align: center;
+            box-shadow: 0 0 40px rgba(0, 210, 255, 0.35);
+            color: white;
+            max-width: 440px;
+            width: 90%;
+            pointer-events: auto;
+        }
+
+        .confirm-box h3 {
+            font-size: 26px;
+            margin: 0 0 8px 0;
+            font-weight: 900;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, #00d2ff, #0077ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .confirm-box p {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 0 0 24px 0;
+        }
+
+        .modal-buttons {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 12px;
         }
 
-        .param-header {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .param-val {
-            color: var(--accent-cyan);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .slider {
-            width: 120px;
-            height: 6px;
-            border-radius: 3px;
-            background: rgba(255, 255, 255, 0.15);
-            outline: none;
-            -webkit-appearance: none;
-            cursor: pointer;
-        }
-
-        .slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 15px;
-            height: 15px;
-            border-radius: 50%;
-            background: var(--accent-cyan);
-            cursor: pointer;
-            box-shadow: 0 0 8px rgba(0, 210, 255, 0.8);
-        }
-
-        .select-input {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            color: var(--text-main);
-            padding: 5px 10px;
-            border-radius: 6px;
-            font-family: 'Outfit', sans-serif;
-            font-weight: 600;
-            font-size: 0.82rem;
-            outline: none;
-            cursor: pointer;
-        }
-
-        .select-input option {
-            background: #0a121e;
-            color: #ffffff;
-        }
-
-        /* Controls Hints */
-        .hint-bar {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            z-index: 10;
-            background: var(--bg-dark);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px;
-            padding: 8px 14px;
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            display: flex;
-            gap: 14px;
-        }
-
-        .hint-bar kbd {
-            background: rgba(255, 255, 255, 0.15);
-            color: #ffffff;
-            padding: 2px 5px;
-            border-radius: 4px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.72rem;
-        }
-
-        #toast {
-            position: absolute;
-            top: 76px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-20px);
-            background: rgba(0, 230, 118, 0.92);
-            color: #02180c;
-            padding: 8px 20px;
+        .modal-btn {
+            border: none;
             border-radius: 8px;
+            padding: 12px 20px;
+            font-size: 14px;
             font-weight: 800;
-            font-size: 0.88rem;
-            z-index: 100;
-            opacity: 0;
-            pointer-events: none;
-            transition: all 0.22s ease;
-            box-shadow: 0 4px 20px rgba(0, 230, 118, 0.5);
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+            transition: all 0.16s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
-        #toast.show {
+        .modal-btn.primary {
+            background: linear-gradient(135deg, #00b0ff, #0066ff);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 150, 255, 0.4);
+        }
+
+        .modal-btn.primary:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 20px rgba(0, 150, 255, 0.6);
+        }
+
+        .modal-btn.secondary {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .modal-btn.secondary:hover {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: var(--accent-cyan);
+            transform: scale(1.02);
+        }
+
+        .modal-btn.danger {
+            background: rgba(255, 60, 60, 0.2);
+            border: 1px solid rgba(255, 60, 60, 0.4);
+            color: #ff9999;
+        }
+
+        .modal-btn.danger:hover {
+            background: rgba(255, 60, 60, 0.35);
+            transform: scale(1.02);
+        }
+
+        /* In-Game Floating Toast Notification */
+        .music-toast {
+            position: absolute;
+            top: 28px;
+            left: 50%;
             transform: translateX(-50%) translateY(0);
+            background: rgba(11, 29, 40, 0.94);
+            backdrop-filter: blur(12px);
+            border: 1.5px solid var(--accent-cyan);
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 0.95rem;
+            padding: 10px 26px;
+            border-radius: 25px;
+            box-shadow: 0 8px 30px rgba(0, 210, 255, 0.4);
+            pointer-events: none;
+            z-index: 2000;
             opacity: 1;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .music-toast.hidden {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-15px);
+            pointer-events: none;
+        }
+
+        .hidden {
+            display: none !important;
+            opacity: 0;
         }
 
         #file-input {
@@ -329,87 +645,170 @@
     </script>
 </head>
 <body>
+    <!-- Game/Editor 3D Canvas -->
     <canvas id="editor-canvas"></canvas>
 
-    <div class="top-nav">
-        <div class="nav-card">
-            <div class="brand">
-                <span>🏝️ CryWorld</span>
-                <span class="brand-badge">Level Editor</span>
+    <!-- Center Gameplay Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- HUD Overlay matching Gameplay -->
+    <div id="hud-container">
+        <!-- Top Row -->
+        <div class="hud-header">
+            <div class="hud-card stats-card">
+                <div class="stat-item">🌋 <span id="pos-info">X: 0 Y: 0 Z: 0</span></div>
+                <div class="stat-item"><span id="biome-info" style="color: #00e5ff; font-weight: bold;">🏝️ ATOLLO E LAGUNA TROPICALE</span></div>
+                <div class="stat-item"><span id="mode-badge" class="mode-badge">🛠️ LIVE LEVEL BUILDER</span></div>
+                <div class="stat-item"><span id="fly-info" style="color: #ffeb3b; font-weight: bold;">🛸 DRONE FLY</span></div>
+                <div class="stat-item"><span id="mod-counter" style="color: #00e676; font-family: monospace;">Mods: 0</span></div>
             </div>
-            <div class="coord-pill" id="cursor-pos">Cursor: X: 0 Y: 120 Z: 0</div>
-            <div class="coord-pill" id="mod-count" style="color: var(--accent-green); background: rgba(0, 230, 118, 0.1); border-color: rgba(0, 230, 118, 0.25);">Mods: 0 voxels</div>
-        </div>
 
-        <div class="nav-card">
-            <button class="btn" id="btn-topdown">📐 Top-Down [T]</button>
-            <button class="btn" id="btn-reset">🔄 Reset</button>
-            <button class="btn" id="btn-import">📂 Import JSON</button>
-            <button class="btn btn-primary" id="btn-export">💾 Export Map</button>
-            <button class="btn btn-success" id="btn-play">🎮 Play Map</button>
-        </div>
-    </div>
-
-    <div class="tools-sidebar">
-        <button class="tool-btn active" data-tool="sculpt" title="Sculpt (Alza / Scava)">
-            <span>⛰️</span>
-            <span class="hotkey">1</span>
-        </button>
-        <button class="tool-btn" data-tool="flatten" title="Flatten Plateau (Livella)">
-            <span>🪨</span>
-            <span class="hotkey">2</span>
-        </button>
-        <button class="tool-btn" data-tool="smooth" title="Smooth (Leviga)">
-            <span>🌊</span>
-            <span class="hotkey">3</span>
-        </button>
-        <button class="tool-btn" data-tool="foliage" title="Paint Vegetation (Alberi & Rocce)">
-            <span>🌴</span>
-            <span class="hotkey">4</span>
-        </button>
-        <button class="tool-btn" data-tool="stamp" title="Stamp Island Preset (Timbro Isola)">
-            <span>🌋</span>
-            <span class="hotkey">5</span>
-        </button>
-        <button class="tool-btn" data-tool="eraser" title="Eraser (Azzera Modifiche)">
-            <span>🗑️</span>
-            <span class="hotkey">6</span>
-        </button>
-    </div>
-
-    <div class="brush-panel">
-        <div class="param-group">
-            <div class="param-header">
-                <span>Radius</span>
-                <span class="param-val" id="val-radius">18m</span>
+            <div class="hud-top-right">
+                <button class="action-btn play-btn" id="btn-quick-play" title="Lancia e testa subito la mappa nel gioco reale [Tasto P]">
+                    🎮 GIOCA [P]
+                </button>
+                <button class="action-btn save-btn" id="btn-quick-save" title="Salva le modifiche nella mappa locale [Ctrl+S]">
+                    💾 SALVA
+                </button>
+                <button class="action-btn" id="btn-open-menu" title="Menu e opzioni file mappa [ESC]">
+                    ⚙️ OPZIONI
+                </button>
             </div>
-            <input type="range" min="3" max="60" value="18" class="slider" id="slider-radius">
         </div>
 
-        <div class="param-group">
-            <div class="param-header">
-                <span>Strength</span>
-                <span class="param-val" id="val-strength">1.0</span>
+        <!-- Center interactive elements are handled by crosshair & raycaster -->
+
+        <!-- Bottom Controls & Hotbar Section -->
+        <div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+            <!-- Floating Brush Parameters Pill directly above Hotbar -->
+            <div id="brush-hud">
+                <div class="brush-pill">
+                    <span>RAGGIO:</span>
+                    <button class="mini-btn" id="btn-radius-minus">-</button>
+                    <span class="brush-val" id="val-radius">18 m</span>
+                    <button class="mini-btn" id="btn-radius-plus">+</button>
+                </div>
+                <div class="brush-pill">
+                    <span>FORZA:</span>
+                    <button class="mini-btn" id="btn-strength-minus">-</button>
+                    <span class="brush-val" id="val-strength">1.0</span>
+                    <button class="mini-btn" id="btn-strength-plus">+</button>
+                </div>
+                <div class="brush-pill" id="pill-suboption" style="display: none;">
+                    <span id="lbl-suboption">TIPO:</span>
+                    <select id="select-suboption" class="pill-select"></select>
+                </div>
+                <div class="brush-hint">
+                    <span id="tool-hint">Click SX: Alza | Click DX: Scava | Rotellina: Raggio | P: Gioca</span>
+                </div>
             </div>
-            <input type="range" min="0.1" max="2.5" step="0.1" value="1.0" class="slider" id="slider-strength">
-        </div>
 
-        <div class="param-group" id="group-type" style="display: none;">
-            <div class="param-header"><span id="lbl-type">Type</span></div>
-            <select class="select-input" id="select-type">
-            </select>
+            <!-- In-Game Hotbar matching Survival Style -->
+            <div id="hotbar-container">
+                <div class="hotbar-slot active" data-tool="sculpt" data-slot="1">
+                    <span class="slot-num">1</span>
+                    <span class="slot-icon">⛰️</span>
+                    <span class="slot-name">Scolpisci</span>
+                </div>
+                <div class="hotbar-slot" data-tool="flatten" data-slot="2">
+                    <span class="slot-num">2</span>
+                    <span class="slot-icon">🪨</span>
+                    <span class="slot-name">Livella</span>
+                </div>
+                <div class="hotbar-slot" data-tool="smooth" data-slot="3">
+                    <span class="slot-num">3</span>
+                    <span class="slot-icon">🌊</span>
+                    <span class="slot-name">Leviga</span>
+                </div>
+                <div class="hotbar-slot" data-tool="foliage" data-slot="4">
+                    <span class="slot-num">4</span>
+                    <span class="slot-icon">🌴</span>
+                    <span class="slot-name">Vegetazione</span>
+                </div>
+                <div class="hotbar-slot" data-tool="stamp" data-slot="5">
+                    <span class="slot-num">5</span>
+                    <span class="slot-icon">🌋</span>
+                    <span class="slot-name">Archetipi</span>
+                </div>
+                <div class="hotbar-slot" data-tool="beach" data-slot="6">
+                    <span class="slot-num">6</span>
+                    <span class="slot-icon">🏖️</span>
+                    <span class="slot-name">Spiaggia</span>
+                </div>
+                <div class="hotbar-slot" data-tool="eraser" data-slot="7">
+                    <span class="slot-num">7</span>
+                    <span class="slot-icon">🗑️</span>
+                    <span class="slot-name">Ripristina</span>
+                </div>
+                <div class="hotbar-slot" data-tool="view" data-slot="8">
+                    <span class="slot-num">8</span>
+                    <span class="slot-icon">📐</span>
+                    <span class="slot-name">Visuale</span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="hint-bar">
-        <span><kbd>Click SX</kbd> Applica Pennello</span>
-        <span><kbd>Shift + Click SX</kbd> Scava / Inverti</span>
-        <span><kbd>Click DX + Drag</kbd> Orbita Vista</span>
-        <span><kbd>W A S D</kbd> Vola</span>
-        <span><kbd>Rotellina</kbd> Zoom / Altezza</span>
+    <!-- Bottom Left Real-time FPS Counter, Version & Camera Mode -->
+    <div class="hud-bottom-left">
+        <div class="hud-card fps-card">
+            FPS: <span id="fps-counter">60</span>
+        </div>
+        <div class="hud-card version-card">
+            V 0.201
+        </div>
+        <div class="hud-card altimeter-card" id="altimeter-card">
+            ✈️ ALT: <span id="alt-counter">0 m</span>
+        </div>
+        <div class="hud-card cam-mode-card" id="btn-toggle-cam" title="Premi F per alternare Volo Drone / A Piedi">
+            🎥 <span id="cam-mode-text">VOLO DRONE [F]</span>
+        </div>
     </div>
 
-    <div id="toast">Mappa salvata con successo!</div>
+    <!-- Initial Click-to-Play Blocker Overlay matching Gameplay -->
+    <div id="blocker">
+        <div id="homepage-version">V 0.201</div>
+        <div id="instructions">
+            <h2>LEVEL BUILDER 3D</h2>
+            <p class="subtitle">Editor Sandbox Integrato nel Mondo di Gioco</p>
+            <button class="main-play-btn" id="btn-start-editing">ENTRA NELL'EDITOR</button>
+            <div class="instructions-detail">
+                <strong>COMANDI GAMEPLAY &amp; EDITOR:</strong>
+                <ul>
+                    <li><span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> &nbsp; Muoviti / Vola sulla mappa</li>
+                    <li><span class="key">Mouse</span> &nbsp; Mira con il mirino (Puntamento 3D)</li>
+                    <li><span class="key">Spazio</span> &nbsp; Sali &nbsp; | &nbsp; <span class="key">Q</span> &nbsp; Scendi</li>
+                    <li><span class="key">Shift</span> &nbsp; Turbo Volo (3x velocità)</li>
+                    <li><span class="key">Click SX</span> &nbsp; <b>Applica Strumento</b> (Alza terreno, Pianta, Applica timbro)</li>
+                    <li><span class="key">Click DX</span> &nbsp; <b>Scava / Alterna</b> (Rimuovi voxel o vegetazione)</li>
+                    <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Seleziona strumento Hotbar</li>
+                    <li><span class="key">Rotellina</span> o <span class="key">[</span> <span class="key">]</span> &nbsp; Modifica raggio pennello</li>
+                    <li><span class="key">F</span> &nbsp; Alterna Volo Drone / A Piedi</li>
+                    <li><span class="key">P</span> &nbsp; <b>Gioca Subito</b> (Testa istantaneamente la mappa)</li>
+                    <li><span class="key">ESC</span> &nbsp; Menu Opzioni / Salva / Importa</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- In-Game Options / Pause Modal matching Gameplay -->
+    <div id="editor-modal" class="hidden">
+        <div class="confirm-box">
+            <h3>⚙️ MENU LIVELLO</h3>
+            <p>Salva, esporta o gioca subito la mappa personalizzata</p>
+            <div class="modal-buttons">
+                <button class="modal-btn primary" id="modal-resume">▶️ RIPRENDI EDITING [ESC]</button>
+                <button class="modal-btn primary" style="background: linear-gradient(135deg, #ff7b00, #ffae00);" id="modal-play">🎮 GIOCA QUESTA MAPPA [P]</button>
+                <button class="modal-btn secondary" id="modal-export">💾 ESPORTA FILE JSON</button>
+                <button class="modal-btn secondary" id="modal-import">📂 IMPORTA FILE JSON</button>
+                <button class="modal-btn danger" id="modal-reset">🔄 RIPRISTINA MAPPA NATURALE</button>
+                <button class="modal-btn secondary" onclick="window.location.href='index.html'" style="margin-top: 6px;">🚪 TORNA AL GIOCO PRINCIPALE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification matching Gameplay -->
+    <div id="toast" class="music-toast hidden">Mappa salvata con successo!</div>
     <input type="file" id="file-input" accept=".json">
 
     <script type="module" src="editor.js"></script>
