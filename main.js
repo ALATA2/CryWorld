@@ -116,35 +116,39 @@ function init() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15; // Bright, sun-drenched exposure
 
-    // 3. Lighting Setup
-    // Bright sky blue ambient light representing light scattered by a tropical sky
-    const ambientLight = new THREE.AmbientLight(0xdff2ff, 0.85);
+    // 3. Lighting Setup (Next-Gen Tropical Golden Sunlight + Sky/Jungle Hemisphere Fill)
+    const ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
     scene.add(ambientLight);
 
-    // Intense vertical white sunlight for a "sole a picco" effect
-    const dirLight = new THREE.DirectionalLight(0xfffff0, 2.0);
+    const hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
+    hemiLight.position.set(0, 300, 0);
+    scene.add(hemiLight);
+
+    // Warm golden-white tropical sunlight casting crisp shadows and water shimmer
+    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.35);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 1024;
-    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
     dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 150;
-    const d = 60;
+    dirLight.shadow.camera.far = 260;
+    const d = 95;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
-    dirLight.shadow.bias = -0.0005;
+    dirLight.shadow.bias = -0.0004;
     scene.add(dirLight);
 
-    // 4. Sky and Sun Configuration (Custom Gradient Sky Dome with Procedural Stars)
-    const skyGeo = new THREE.SphereGeometry(1, 32, 15);
+    // 4. Sky and Sun Configuration (Photorealistic Tropical Sky with Volumetric Cumulus Clouds & Stars)
+    const skyGeo = new THREE.SphereGeometry(1, 48, 24);
     const skyMat = new THREE.ShaderMaterial({
         uniforms: {
-            topColor: { value: new THREE.Color(0x0078d7) }, // Deep tropical cobalt blue
-            bottomColor: { value: new THREE.Color(0x8ce3ff) }, // Caribbean cyan horizon
-            exponent: { value: 0.6 },
+            topColor: { value: new THREE.Color(0x0b5ec9) }, // Deep azure zenith
+            bottomColor: { value: new THREE.Color(0x9be2ff) }, // Luminous tropical horizon
+            exponent: { value: 0.55 },
             sunDirection: { value: new THREE.Vector3() },
-            starIntensity: { value: 0.0 }
+            starIntensity: { value: 0.0 },
+            uTime: { value: 0.0 }
         },
         vertexShader: `
             varying vec3 vWorldPosition;
@@ -162,8 +166,38 @@ function init() {
             uniform float exponent;
             uniform vec3 sunDirection;
             uniform float starIntensity;
+            uniform float uTime;
 
-            // Fast 3D hash for celestial coordinates
+            // Fast hashes & 2D/3D Value Noise for volumetric cumulus clouds and stars
+            float hash21(vec2 p) {
+                p = fract(p * vec2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return fract(p.x * p.y);
+            }
+
+            float noise2D(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = hash21(i);
+                float b = hash21(i + vec2(1.0, 0.0));
+                float c = hash21(i + vec2(0.0, 1.0));
+                float d = hash21(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+
+            float fbmCloud(vec2 p) {
+                float v = 0.0;
+                float amp = 0.5;
+                mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+                for (int i = 0; i < 5; i++) {
+                    v += amp * noise2D(p);
+                    p = rot * p * 2.03 + vec2(13.7, 29.1);
+                    amp *= 0.5;
+                }
+                return v;
+            }
+
             float hash31(vec3 p) {
                 p = fract(p * vec3(443.897, 441.423, 437.195));
                 p += dot(p, p.yzx + 19.19);
@@ -171,7 +205,6 @@ function init() {
             }
 
             float getStars(vec3 dir) {
-                // Layer 1: Crisp brilliant stars
                 vec3 p = dir * 260.0;
                 vec3 id = floor(p);
                 vec3 f = fract(p) - 0.5;
@@ -183,8 +216,6 @@ function init() {
                     float brightness = fract(n * 137.45);
                     star = smoothstep(0.075, 0.01, dist) * (0.7 + 0.7 * brightness);
                 }
-
-                // Layer 2: Dense starry background / Milky Way dust
                 vec3 p2 = dir * 520.0;
                 vec3 id2 = floor(p2);
                 vec3 f2 = fract(p2) - 0.5;
@@ -199,30 +230,71 @@ function init() {
 
             void main() {
                 vec3 dir = normalize(vWorldPosition);
+                vec3 sunDir = normalize(sunDirection);
                 float h = dir.y;
+                float sunGlow = max(0.0, dot(dir, sunDir));
+
                 vec3 skyColor;
                 if (h >= 0.0) {
                     skyColor = mix(bottomColor, topColor, pow(h, exponent));
+                    // Warm golden atmospheric scattering near the horizon & sun
+                    float horizonGlow = pow(1.0 - h, 3.5);
+                    vec3 warmHorizon = vec3(1.0, 0.88, 0.68) * pow(sunGlow, 3.0) * 0.42 * (1.0 - starIntensity);
+                    skyColor += warmHorizon * (0.5 + 0.5 * horizonGlow);
                 } else {
-                    // Below horizon: smoothly fade from bottomColor down into deep ocean abyss color
-                    // This completely eliminates any glowing cyan band under the world or underwater!
                     vec3 abyssColor = vec3(0.003, 0.015, 0.035);
                     float abyssFactor = pow(clamp(-h * 4.5, 0.0, 1.0), 0.7);
                     skyColor = mix(bottomColor, abyssColor, abyssFactor);
                 }
                 
-                // Add crisp stars in space when starIntensity > 0 (360 degrees cosmos)
+                // Add crisp stars in space when starIntensity > 0
                 if (starIntensity > 0.0) {
                     float stars = getStars(dir);
                     vec3 starTint = mix(vec3(0.85, 0.93, 1.0), vec3(1.0, 0.92, 0.78), hash31(floor(dir * 260.0)));
                     skyColor += starTint * stars * starIntensity;
                 }
 
-                // Add a soft sun disk and corona glow
-                float sunGlow = max(0.0, dot(dir, normalize(sunDirection)));
-                vec3 sunColor = vec3(1.0, 1.0, 0.95);
-                skyColor += sunColor * pow(sunGlow, 220.0) * 1.0; // Sun disk core
-                skyColor += sunColor * pow(sunGlow, 14.0) * 0.25 * (1.0 - starIntensity * 0.6); // Corona
+                // Volumetric-Style Tropical Cumulus Clouds in Upper Hemisphere
+                float cloudVis = (1.0 - starIntensity * 0.92) * smoothstep(0.015, 0.14, h);
+                if (cloudVis > 0.001 && h > 0.01) {
+                    // Project ray onto curved atmospheric cloud dome
+                    vec2 cloudUV = dir.xz / (h + 0.13);
+                    vec2 wind = vec2(uTime * 0.012, uTime * 0.005);
+
+                    // Base billowing cumulus shape + fine cauliflower edges
+                    float baseN = fbmCloud(cloudUV * 0.65 + wind);
+                    float detailN = fbmCloud(cloudUV * 1.85 - wind * 1.4);
+                    float cloudShape = baseN * 0.72 + detailN * 0.28;
+                    float cloudDensity = smoothstep(0.47, 0.72, cloudShape);
+
+                    if (cloudDensity > 0.001) {
+                        // Directional sunlight self-shadowing sample toward the sun
+                        vec2 sunStep = normalize(sunDir.xz + vec2(0.0001)) * 0.16;
+                        float shadowSample = fbmCloud((cloudUV + sunStep) * 0.65 + wind);
+                        float selfShadow = clamp((shadowSample - cloudShape) * 3.2 + 0.5, 0.0, 1.0);
+                        float topLight = clamp(1.0 - selfShadow * 0.75 + detailN * 0.25, 0.0, 1.0);
+
+                        // Silver lining Mie forward scattering near the sun
+                        float mieLining = pow(sunGlow, 8.0) * (1.0 - cloudDensity * 0.5) * 0.65;
+
+                        vec3 cloudBright = vec3(1.0, 0.98, 0.94); // Warm sunlit white-gold top
+                        vec3 cloudShadow = vec3(0.62, 0.71, 0.82); // Soft tropical blue-grey base
+                        vec3 cloudCol = mix(cloudShadow, cloudBright, topLight);
+                        cloudCol += vec3(1.0, 0.90, 0.70) * mieLining;
+
+                        // Blend distant horizon clouds gently into atmospheric horizon haze
+                        float distFade = smoothstep(0.015, 0.22, h);
+                        cloudCol = mix(bottomColor * 1.04, cloudCol, 0.35 + 0.65 * distFade);
+
+                        skyColor = mix(skyColor, cloudCol, cloudDensity * cloudVis * 0.92);
+                    }
+                }
+
+                // Brilliant Golden Sun Disk and Warm Mie Corona
+                vec3 sunColor = vec3(1.0, 0.96, 0.86);
+                skyColor += sunColor * smoothstep(0.9982, 0.9997, sunGlow) * 2.2; // Crisp sun disk
+                skyColor += vec3(1.0, 0.88, 0.62) * pow(sunGlow, 18.0) * 0.38 * (1.0 - starIntensity * 0.6); // Warm inner corona
+                skyColor += vec3(1.0, 0.82, 0.55) * pow(sunGlow, 4.5) * 0.14 * (1.0 - starIntensity * 0.7);  // Wide golden atmospheric glow
                 
                 gl_FragColor = vec4(skyColor, 1.0);
             }
@@ -236,8 +308,8 @@ function init() {
 
     sun = new THREE.Vector3();
     const effectController = {
-        elevation: 50.0, // High noon sun (sole a picco)
-        azimuth: 180,  // Facing North-South
+        elevation: 28.0, // Scenic golden tropical sun angle casting shimmering path across the lagoon
+        azimuth: 195,    // Shining over the islands and ocean
         exposure: renderer.toneMappingExposure
     };
 
@@ -263,7 +335,7 @@ function init() {
     }
     updateSky();
 
-    // 5. Planetary Spherical Ocean Setup (Perfect 360° circular celestial planet body)
+    // 5. Planetary Spherical Ocean Setup (Next-Gen Bathymetric Turquoise Lagoon, Reefs & Shore Foam)
     const waterNormalsTexture = new THREE.TextureLoader().load('waternormals.jpg', function (texture) {
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -279,10 +351,10 @@ function init() {
             textureHeight: 512,
             waterNormals: waterNormalsTexture,
             sunDirection: sun,
-            sunColor: 0xffdfaa, // Bright sunlight specular reflections
-            waterColor: 0x005a78, // Vibrant Caribbean tropical turquoise-blue
-            distortionScale: 1.5,
-            alpha: 0.98, // Opaque Caribbean ocean water on surface (non-transparent)
+            sunColor: 0xffe6b8, // Warm golden sunlight specular glints
+            waterColor: 0x004e75, // Deep tropical ocean base color
+            distortionScale: 1.8,
+            alpha: 0.98,
             fog: scene.fog !== undefined
         }
     );
@@ -333,11 +405,36 @@ function init() {
          }`
     );
 
-    // Planetary Atmosphere Limb glow, smooth horizon cutoff & island dry land masking in fragment shader
+    // Bathymetric Turquoise Lagoon, Coral Reef Shadows, Shoreline Foam & Planetary Limb Glow
     water.material.fragmentShader = `
         uniform vec3 cameraPos;
         uniform sampler2D waterMaskTexture;
         uniform vec4 waterMaskBounds;
+        uniform sampler2D heightmapTexture;
+
+        float wHash21(vec2 p) {
+            p = fract(p * vec2(127.1, 311.7));
+            p += dot(p, p + 34.5);
+            return fract(p.x * p.y);
+        }
+        float wNoise2(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(
+                mix(wHash21(i), wHash21(i + vec2(1.0, 0.0)), f.x),
+                mix(wHash21(i + vec2(0.0, 1.0)), wHash21(i + vec2(1.0, 1.0)), f.x),
+                f.y
+            );
+        }
+        float wFbm(vec2 p) {
+            float v = 0.0;
+            v += 0.50 * wNoise2(p); p *= 2.04;
+            v += 0.25 * wNoise2(p); p *= 2.02;
+            v += 0.125 * wNoise2(p); p *= 2.03;
+            v += 0.0625 * wNoise2(p);
+            return v;
+        }
     ` + water.material.fragmentShader;
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
@@ -352,6 +449,88 @@ function init() {
          }
 
          float distAlpha = alpha;
+         vec3 finalColor = outgoingLight;
+
+         if (eye.y >= worldPosition.y) {
+             // 1. Compute Bathymetric Water Depth from Heightmap + Analytical Island Coastlines
+             vec2 vxvz = worldPosition.xz / 3.0;
+             float distCenter = length(vxvz);
+             float distAtoll = abs(distCenter - 38.0);
+             float wAtoll = max(0.0, 1.0 - distAtoll / 22.0);
+             if (distCenter < 38.0) wAtoll = max(0.45, wAtoll);
+
+             vec2 dVol = vec2(vxvz.x, (vxvz.y - 95.0) * (vxvz.y < 95.0 ? 0.5 : 1.0));
+             float wVol = max(0.0, 1.0 - length(dVol) / 42.0);
+
+             float dA = length((vxvz - vec2(250.0, 240.0)) * vec2(1.15, 0.85));
+             float dB = length((vxvz - vec2(220.0, 20.0)) * vec2(1.10, 0.95));
+             float dC = length((vxvz - vec2(260.0, -220.0)) * vec2(1.15, 0.70));
+             float wEast = max(max(max(0.0, 1.0 - dA / 128.0), max(0.0, 1.0 - dB / 108.0)), max(0.0, 1.0 - dC / 158.0));
+
+             float landProx = max(max(wAtoll, wVol), wEast);
+             float analyticDepth = clamp((1.0 - landProx) * 28.0, 0.0, 28.0);
+             // Inside lagoon center, keep a realistic 3.5m - 8.5m tropical lagoon depth
+             if (distCenter < 36.0) {
+                 analyticDepth = mix(2.2, 8.5, clamp((36.0 - distCenter) / 36.0, 0.0, 1.0));
+             }
+
+             float waterDepth = analyticDepth;
+             vec2 hmUV = (worldPosition.xz + 384.0) / 768.0;
+             if (hmUV.x >= 0.02 && hmUV.x <= 0.98 && hmUV.y >= 0.02 && hmUV.y <= 0.98) {
+                 float hmH = texture2D(heightmapTexture, hmUV).r * 192.0;
+                 float hmDepth = max(0.0, 120.0 - hmH);
+                 waterDepth = min(analyticDepth, hmDepth);
+             }
+
+             // 2. Tropical Bathymetry Palette: Electric Turquoise Shallows -> Aquamarine -> Deep Royal Sapphire
+             float shallowT = exp(-waterDepth * 0.24);
+             float midT     = exp(-waterDepth * 0.085);
+
+             // Mottled coral reef colonies visible in shallow turquoise water (matching Image 2)
+             float reefNoise = wFbm(worldPosition.xz * 0.045);
+             float reefFine  = wNoise2(worldPosition.xz * 0.22);
+             float coralMask = smoothstep(0.45, 0.66, reefNoise) * smoothstep(11.0, 1.2, waterDepth);
+
+             vec3 shallowSandCol = vec3(0.08, 0.92, 0.88) * (0.92 + 0.16 * reefFine); // Crystal electric turquoise over white sand
+             vec3 coralReefCol   = vec3(0.01, 0.26, 0.34) * (0.85 + 0.30 * reefFine); // Dark mottled coral reef patch
+             vec3 shallowLagoon  = mix(shallowSandCol, coralReefCol, coralMask * 0.78);
+
+             vec3 midLagoonCol   = vec3(0.00, 0.56, 0.78); // Rich tropical aquamarine
+             vec3 deepOceanCol   = vec3(0.01, 0.18, 0.40); // Deep royal sapphire blue
+
+             vec3 tropicWaterCol = mix(deepOceanCol, midLagoonCol, midT);
+             tropicWaterCol      = mix(tropicWaterCol, shallowLagoon, shallowT);
+
+             // 3. Fresnel Blend with Mirror Sky Reflection + Golden Sun Specular Path
+             vec3 viewDir = normalize(eye - worldPosition.xyz);
+             float NdotV = max(0.0, dot(surfaceNormal, viewDir));
+             float fresnel = clamp(pow(1.0 - NdotV, 3.2), 0.08, 0.78);
+
+             // Blend vibrant tropical water body with sky reflection
+             finalColor = mix(tropicWaterCol, outgoingLight * 1.08, fresnel * (0.35 + 0.65 * (1.0 - shallowT)));
+
+             // Warm Golden Sunlight Shimmer Path across the waves
+             vec3 sunDirN = normalize(sunDirection);
+             vec3 halfVec = normalize(sunDirN + viewDir);
+             float NdotH = max(0.0, dot(surfaceNormal, halfVec));
+             float sunGlintCore = pow(NdotH, 240.0) * 2.6;
+             float sunGlintPath = pow(NdotH, 32.0) * 0.38;
+             finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
+
+             // 4. Crisp Frothy White Shoreline Breaking Surf & Foam
+             float wavePhase = sin(waterDepth * 3.8 - time * 6.5 + reefNoise * 4.0);
+             float foamNoise = wFbm(worldPosition.xz * 0.35 + vec2(time * 0.4, -time * 0.3));
+             float edgeFoam  = smoothstep(1.35, 0.05, waterDepth) * smoothstep(0.22, 0.58, foamNoise + (1.0 - waterDepth / 1.35) * 0.45);
+             float crestFoam = smoothstep(2.6, 0.3, waterDepth) * smoothstep(0.62, 0.92, wavePhase * 0.5 + 0.5) * smoothstep(0.38, 0.72, foamNoise) * 0.65;
+             float totalFoam = clamp(edgeFoam + crestFoam, 0.0, 1.0);
+
+             vec3 foamColor = vec3(0.96, 0.99, 1.0);
+             finalColor = mix(finalColor, foamColor, totalFoam);
+
+             // Smooth shallow shoreline alpha blending so wet beach sand & coral reef show through crystal-clear at the edge, while deep ocean stays 98% opaque
+             distAlpha = mix(0.52, alpha, smoothstep(0.0, 5.5, waterDepth));
+             distAlpha = max(distAlpha, totalFoam * 0.96);
+         }
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
          float distH = length(worldPosition.xz - cameraPos.xz);
@@ -360,7 +539,7 @@ function init() {
          if (eye.y >= worldPosition.y) {
              atmoHalo = vec3(0.20, 0.70, 1.0) * atmoLimb * 1.5;
          }
-         vec3 finalColor = outgoingLight + atmoHalo;
+         finalColor += atmoHalo;
 
          // Smooth circular horizon cutoff (zero square edges)
          float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
@@ -706,59 +885,7 @@ function init() {
     manipulator.visible = false;
     camera.add(manipulator);
 
-    // 7bc. Low-Poly Floating Clouds Setup (matches low-poly sample screenshots)
-    const cloudsGroup = new THREE.Group();
-    scene.add(cloudsGroup);
-    
-    const cloudMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        flatShading: true,
-        roughness: 0.95,
-        metalness: 0.0
-    });
-    
-    for (let c = 0; c < 15; c++) {
-        const cloud = new THREE.Group();
-        const partsCount = 7 + Math.floor(Math.random() * 5); // 7 to 11 parts for rich detail
-        
-        for (let p = 0; p < partsCount; p++) {
-            const t = p / (partsCount - 1);
-            const offsetFactor = t - 0.5; // range -0.5 to 0.5
-            
-            // Taper sizes from the center outward
-            const baseRad = 7.0 + Math.random() * 5.0;
-            const rad = baseRad * (1.0 - Math.abs(offsetFactor) * 1.2);
-            if (rad < 2.5) continue; // Skip too small parts
-            
-            // Detail 1 gives a beautifully faceted low-poly sphere
-            const part = new THREE.Mesh(new THREE.DodecahedronGeometry(rad, 1), cloudMat);
-            
-            // Align bottoms of the spheres near the same plane (creating flat bottoms)
-            const posX = offsetFactor * 42.0; // Elongate the cloud cluster
-            const posY = rad * 0.35; // Lift slightly so bottom is flatter
-            const posZ = (Math.random() - 0.5) * rad * 0.8;
-            
-            part.position.set(posX, posY, posZ);
-            part.scale.set(1.5, 0.45 + Math.random() * 0.15, 1.1); // Squash flat on Y
-            part.rotation.set(
-                (Math.random() - 0.5) * 0.1,
-                Math.random() * Math.PI,
-                (Math.random() - 0.5) * 0.1
-            );
-            cloud.add(part);
-        }
-        
-        const range = 1200;
-        cloud.position.set(
-            (Math.random() - 0.5) * range,
-            220 + Math.random() * 80,
-            (Math.random() - 0.5) * range
-        );
-        cloud.userData = { speed: 0.3 + Math.random() * 1.2 };
-        
-        cloudsGroup.add(cloud);
-        clouds.push(cloud);
-    }
+    // 7bc. Volumetric clouds are rendered directly in the Sky Dome Shader (zero low-poly cloud meshes)
 
     // 7bd. Hotbar Slot Selection Handler
     function selectSlot(slotNum) {
@@ -2028,16 +2155,9 @@ function animate() {
         }
     }
 
-    // 5d. Animate low-poly clouds drifting slowly across the sky
-    if (clouds) {
-        for (const cloud of clouds) {
-            cloud.position.x += cloud.userData.speed * delta * 4.0; // drift speed
-            // Wrap cloud around when it drifts too far
-            if (cloud.position.x > 800) {
-                cloud.position.x = -800;
-                cloud.position.z = (Math.random() - 0.5) * 1200;
-            }
-        }
+    // 5d. Animate volumetric sky clouds slowly drifting in the wind
+    if (sky && sky.material && sky.material.uniforms && sky.material.uniforms['uTime']) {
+        sky.material.uniforms['uTime'].value += delta;
     }
 
     // 5e. Update active terrain chunks and center sky dome on the player
@@ -2056,53 +2176,52 @@ function animate() {
 }
 
 // ==========================================
-// PROCEDURAL ENVIRONMENT GENERATION (PALM TREES & BOULDERS)
+// PROCEDURAL ENVIRONMENT GENERATION (PALM TREES, TROPICAL BUSHES & BOULDERS)
 // ==========================================
 function spawnEnvironmentObjects(scene, terrain) {
-    const palmTreesCount = 180;
-    const pineTreesCount = 90;
-    const rocksCount = 120;
+    const palmTreesCount = 320;
+    const pineTreesCount = 130;
+    const rocksCount = 160;
+    const bushesCount = 340;
     
-    // Procedural low-poly Palm Tree segment generator
+    // Procedural Coconut Palm Tree generator (curved trunks & lush arching fronds)
     function createPalmTree() {
         const treeGroup = new THREE.Group();
         
-        // Taller trunk segments (more graceful)
-        const trunkSegmentsCount = 7 + Math.floor(Math.random() * 4);
+        // Taller graceful trunk segments
+        const trunkSegmentsCount = 8 + Math.floor(Math.random() * 4);
         let currentHeight = 0;
         const trunkGroup = new THREE.Group();
         
-        // Light grey-beige wood material (tropical palm look)
+        // Warm weathered coconut palm bark material
         const trunkMat = new THREE.MeshStandardMaterial({
-            color: 0xa18f7c,
-            flatShading: true,
-            roughness: 0.95
+            color: 0x9c8874,
+            flatShading: false,
+            roughness: 0.92
         });
         
         // Accumulate rotation to make trunk bend/lean elegantly over the beach
         let bendX = 0;
         let bendZ = 0;
-        const bendDirectionX = (Math.random() - 0.5) * 0.22; // More pronounced leaning
-        const bendDirectionZ = (Math.random() - 0.5) * 0.22;
+        const bendDirectionX = (Math.random() - 0.5) * 0.24;
+        const bendDirectionZ = (Math.random() - 0.5) * 0.24;
         
         for (let i = 0; i < trunkSegmentsCount; i++) {
             const h = 1.1;
             let rBottom = 0.32 * (1.0 - i / (trunkSegmentsCount + 3));
             let rTop = 0.32 * (1.0 - (i + 1) / (trunkSegmentsCount + 3));
             
-            // Flared base foot for coconut palm (referencing photo 1)
             if (i === 0) {
                 rBottom = rBottom * 1.95;
             }
             
-            const segmentGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 5);
+            const segmentGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 7);
             const segment = new THREE.Mesh(segmentGeo, trunkMat);
             segment.castShadow = true;
             segment.receiveShadow = true;
             
             segment.position.y = currentHeight + h / 2;
             
-            // Apply organic curve
             bendX += bendDirectionX;
             bendZ += bendDirectionZ;
             segment.rotation.set(bendX, 0, bendZ);
@@ -2110,8 +2229,7 @@ function spawnEnvironmentObjects(scene, terrain) {
             segment.position.x += Math.sin(bendX) * 0.2;
             segment.position.z += Math.sin(bendZ) * 0.2;
             
-            // Add a bulbous joint ring at the bottom of the segment for textured palm bark
-            const ringGeo = new THREE.CylinderGeometry(rBottom * 1.12, rBottom * 1.12, 0.12, 5);
+            const ringGeo = new THREE.CylinderGeometry(rBottom * 1.10, rBottom * 1.10, 0.12, 7);
             const ring = new THREE.Mesh(ringGeo, trunkMat);
             ring.position.y = -h / 2;
             segment.add(ring);
@@ -2121,12 +2239,12 @@ function spawnEnvironmentObjects(scene, terrain) {
         }
         treeGroup.add(trunkGroup);
         
-        // Leaves at the crown (drooping arching feathered palm fronds)
-        const leavesCount = 9 + Math.floor(Math.random() * 3); // 9 to 11 fronds
+        // Leaves at the crown (11-13 drooping arching feathered palm fronds)
+        const leavesCount = 11 + Math.floor(Math.random() * 3);
         const leafMat = new THREE.MeshStandardMaterial({
-            color: 0x2ecc71, // Bright tropical green
-            flatShading: true,
-            roughness: 0.75,
+            color: 0x2e8b3c, // Rich natural tropical palm green
+            flatShading: false,
+            roughness: 0.65,
             side: THREE.DoubleSide
         });
         
@@ -2137,49 +2255,42 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         for (let i = 0; i < leavesCount; i++) {
             const leaf = new THREE.Group();
-            
-            // Spin around Y axis to distribute leaves radially
             const angle = i * (Math.PI * 2 / leavesCount);
             leaf.rotation.y = angle;
             
             let curY = 0;
             let curZ = 0;
-            let rotX = 0.12; // Initial upward/outward tilt
-            const stemSegments = 5; // Construct leaf from chained segments to curve it
-            const stemL = 0.8;
+            let rotX = (i % 2 === 0) ? 0.08 : 0.22; // Layered upper and lower frond tiers
+            const stemSegments = 5;
+            const stemL = 0.84;
             
             for (let j = 0; j < stemSegments; j++) {
-                // Taper stem size towards the tip
                 const stemW = 0.04 * (1.0 - j / stemSegments);
                 const stemH = 0.03 * (1.0 - j / stemSegments);
                 const stemPartGeo = new THREE.BoxGeometry(stemW, stemH, stemL);
                 const stemPart = new THREE.Mesh(stemPartGeo, leafMat);
                 stemPart.castShadow = true;
                 
-                // Position relative to current segment joint
                 stemPart.position.set(0, curY, curZ + stemL / 2);
                 stemPart.rotation.x = -rotX;
                 leaf.add(stemPart);
                 
-                // Add leaflets along this stem segment (feathered comb pattern, dense as in photo)
                 const leafletsPerSeg = 4;
                 for (let f = 0; f < leafletsPerSeg; f++) {
-                    const segmentProgress = (j * leafletsPerSeg + f) / (stemSegments * leafletsPerSeg); // 0 to 1 along the whole leaf
-                    const leafletLength = 1.3 * Math.sin(segmentProgress * Math.PI); // Longest in middle, tapered
+                    const segmentProgress = (j * leafletsPerSeg + f) / (stemSegments * leafletsPerSeg);
+                    const leafletLength = 1.35 * Math.sin(segmentProgress * Math.PI);
                     if (leafletLength < 0.15) continue;
                     
-                    const leafletW = 0.07 * (1.0 - segmentProgress * 0.4); // Taper width towards tip
+                    const leafletW = 0.075 * (1.0 - segmentProgress * 0.4);
                     const leafletGeo = new THREE.BoxGeometry(leafletW, 0.006, leafletLength);
                     const zOffset = (f / leafletsPerSeg) * stemL;
                     
-                    // Left leaflet
                     const leafletL = new THREE.Mesh(leafletGeo, leafMat);
                     leafletL.castShadow = true;
                     leafletL.position.set(-leafletLength / 2 * 0.85, curY, curZ + zOffset);
                     leafletL.rotation.set(-rotX + 0.1, 0.45, -0.22);
                     leaf.add(leafletL);
                     
-                    // Right leaflet
                     const leafletR = new THREE.Mesh(leafletGeo, leafMat);
                     leafletR.castShadow = true;
                     leafletR.position.set(leafletLength / 2 * 0.85, curY, curZ + zOffset);
@@ -2187,11 +2298,8 @@ function spawnEnvironmentObjects(scene, terrain) {
                     leaf.add(leafletR);
                 }
                 
-                // Move joint pointer forward along the curve
                 curZ += stemL * Math.cos(rotX) * 0.95;
                 curY -= stemL * Math.sin(rotX) * 0.95;
-                
-                // Increase downward rotation for next segment (droop/arch)
                 rotX += 0.18;
             }
             
@@ -2199,18 +2307,17 @@ function spawnEnvironmentObjects(scene, terrain) {
         }
         treeGroup.add(leavesGroup);
         
-        // Add a cluster of 3 coconuts at the center of the palm crown
+        // Cluster of 3 coconuts at the center of the palm crown
         const coconutMat = new THREE.MeshStandardMaterial({
-            color: 0x5a3d28, // Coconut shell brown
-            flatShading: true,
-            roughness: 0.90
+            color: 0x5a3d28,
+            flatShading: false,
+            roughness: 0.85
         });
         
-        const coconutGeo = new THREE.DodecahedronGeometry(0.24, 0);
+        const coconutGeo = new THREE.DodecahedronGeometry(0.24, 1);
         for (let c = 0; c < 3; c++) {
             const coconut = new THREE.Mesh(coconutGeo, coconutMat);
             coconut.castShadow = true;
-            // Position cocos offset under the crown leaves
             const cAngle = c * (Math.PI * 2 / 3);
             coconut.position.set(
                 topSegment.position.x + Math.cos(cAngle) * 0.28,
@@ -2224,22 +2331,21 @@ function spawnEnvironmentObjects(scene, terrain) {
         return treeGroup;
     }
     
-    // Procedural low-poly Maritime Pine generator (referencing photo 2: Pino Marittimo)
+    // Procedural Tropical Canopy Tree / Maritime Pine generator
     function createPineTree() {
         const treeGroup = new THREE.Group();
         
         const trunkMat = new THREE.MeshStandardMaterial({
-            color: 0x8d7a6b, // Light grey-brown wood
-            flatShading: true,
-            roughness: 0.95
+            color: 0x7a6552,
+            flatShading: false,
+            roughness: 0.92
         });
         const foliageMat = new THREE.MeshStandardMaterial({
-            color: 0x27ae60, // Maritime pine green
-            flatShading: true,
-            roughness: 0.85
+            color: 0x227a38,
+            flatShading: false,
+            roughness: 0.80
         });
         
-        // 1. Lower Trunk (Gnarled, curves upward)
         let curY = 0;
         let curX = 0;
         let curZ = 0;
@@ -2249,14 +2355,13 @@ function spawnEnvironmentObjects(scene, terrain) {
         
         for (let i = 0; i < trunkSegments; i++) {
             const rTop = rBottom * 0.9;
-            const segGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 5);
+            const segGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 6);
             const seg = new THREE.Mesh(segGeo, trunkMat);
             seg.castShadow = true;
             seg.receiveShadow = true;
             
             seg.position.set(curX, curY + h/2, curZ);
             
-            // Apply organic twist/bend
             const angleX = 0.18 * Math.sin(i * 1.0);
             const angleZ = 0.12 * Math.cos(i * 1.0);
             seg.rotation.set(angleX, 0, angleZ);
@@ -2269,7 +2374,6 @@ function spawnEnvironmentObjects(scene, terrain) {
             rBottom = rTop;
         }
         
-        // 2. Branching split into 3 gnarled main branches (umbrella shape)
         const branches = [
             { angleY: 0, tiltX: 0.5, tiltZ: 0.2, length: 1.6, scale: 0.8 },
             { angleY: Math.PI * 2/3, tiltX: -0.3, tiltZ: 0.4, length: 1.8, scale: 0.75 },
@@ -2290,12 +2394,11 @@ function spawnEnvironmentObjects(scene, terrain) {
             
             for (let j = 0; j < brSegs; j++) {
                 const nextRad = brRad * 0.85;
-                const segGeo = new THREE.CylinderGeometry(nextRad, brRad, brH, 4);
+                const segGeo = new THREE.CylinderGeometry(nextRad, brRad, brH, 5);
                 const seg = new THREE.Mesh(segGeo, trunkMat);
                 seg.castShadow = true;
                 seg.receiveShadow = true;
                 
-                // Keep branching outwards
                 const tiltX = br.tiltX * (1.0 + j * 0.1);
                 const tiltZ = br.tiltZ * (1.0 + j * 0.15);
                 seg.rotation.set(tiltX, 0, tiltZ);
@@ -2309,24 +2412,22 @@ function spawnEnvironmentObjects(scene, terrain) {
                 brRad = nextRad;
             }
             
-            // 3. Foliage Umbrella Domes at the end of each main branch!
             const foliageDome = new THREE.Group();
             foliageDome.position.set(brX, brY, brZ);
             
-            const cloudParts = 5 + Math.floor(Math.random() * 3);
+            const cloudParts = 6 + Math.floor(Math.random() * 3);
             for (let p = 0; p < cloudParts; p++) {
-                const rad = 0.9 + Math.random() * 0.6;
+                const rad = 0.95 + Math.random() * 0.6;
                 const geo = new THREE.DodecahedronGeometry(rad, 1);
                 const mesh = new THREE.Mesh(geo, foliageMat);
                 mesh.castShadow = true;
                 
-                // Spread horizontally to create a nice wide umbrella profile
                 const px = (Math.random() - 0.5) * 1.5;
                 const pz = (Math.random() - 0.5) * 1.5;
                 const py = (rad * 0.25) + (Math.random() - 0.5) * 0.15;
                 
                 mesh.position.set(px, py, pz);
-                mesh.scale.set(1.4, 0.6 + Math.random() * 0.2, 1.2); // squash flat to look like a canopy umbrella tier
+                mesh.scale.set(1.4, 0.65 + Math.random() * 0.2, 1.2);
                 foliageDome.add(mesh);
             }
             branchGroup.add(foliageDome);
@@ -2341,10 +2442,6 @@ function spawnEnvironmentObjects(scene, terrain) {
     envGroup.position.copy(terrain.group.position);
     scene.add(envGroup);
 
-    // ----------------------------------------------------
-    // OPTIMIZATION: Generate single instancing geometries using BufferGeometryUtils
-    // ----------------------------------------------------
-    
     // Generate one temporary palm to extract and merge geometries
     const tempPalm = createPalmTree();
     const tempPalmGroup = new THREE.Group();
@@ -2361,9 +2458,9 @@ function spawnEnvironmentObjects(scene, terrain) {
             cloneGeo.applyMatrix4(child.matrixWorld);
             
             const color = child.material.color.getHex();
-            if (color === 0xa18f7c) {
+            if (color === 0x9c8874) {
                 palmTrunkGeos.push(cloneGeo);
-            } else if (color === 0x2ecc71) {
+            } else if (color === 0x2e8b3c) {
                 palmLeavesGeos.push(cloneGeo);
             } else if (color === 0x5a3d28) {
                 palmCoconutGeos.push(cloneGeo);
@@ -2375,7 +2472,6 @@ function spawnEnvironmentObjects(scene, terrain) {
     const masterPalmLeavesGeo = BufferGeometryUtils.mergeGeometries(palmLeavesGeos, true);
     const masterPalmCoconutGeo = BufferGeometryUtils.mergeGeometries(palmCoconutGeos, true);
     
-    // Dispose cloned geometries
     palmTrunkGeos.forEach(g => g.dispose());
     palmLeavesGeos.forEach(g => g.dispose());
     palmCoconutGeos.forEach(g => g.dispose());
@@ -2395,9 +2491,9 @@ function spawnEnvironmentObjects(scene, terrain) {
             cloneGeo.applyMatrix4(child.matrixWorld);
             
             const color = child.material.color.getHex();
-            if (color === 0x8d7a6b) {
+            if (color === 0x7a6552) {
                 pineTrunkGeos.push(cloneGeo);
-            } else if (color === 0x27ae60) {
+            } else if (color === 0x227a38) {
                 pineFoliageGeos.push(cloneGeo);
             }
         }
@@ -2406,40 +2502,31 @@ function spawnEnvironmentObjects(scene, terrain) {
     const masterPineTrunkGeo = BufferGeometryUtils.mergeGeometries(pineTrunkGeos, true);
     const masterPineFoliageGeo = BufferGeometryUtils.mergeGeometries(pineFoliageGeos, true);
     
-    // Dispose cloned geometries
     pineTrunkGeos.forEach(g => g.dispose());
     pineFoliageGeos.forEach(g => g.dispose());
 
-    // Create master rock geometry (merged cluster of dodecahedrons for realistic outcrops)
+    // Create master rock geometry (natural weathered boulder cluster)
     const rockClusterGeos = [];
-    
-    // 1. Central main boulder (squashed slightly on Y to sit naturally)
-    const mainRockGeo = new THREE.DodecahedronGeometry(1.0, 0);
+    const mainRockGeo = new THREE.DodecahedronGeometry(1.0, 1);
     mainRockGeo.scale(1.0, 0.72, 1.0);
     rockClusterGeos.push(mainRockGeo);
     
-    // 2. Add 3 satellite stones around the base at random offsets and sizes
     const satelliteCount = 3;
     for (let s = 0; s < satelliteCount; s++) {
         const angle = (s * Math.PI * 2) / satelliteCount + (Math.random() - 0.5) * 0.4;
         const dist = 0.75 + Math.random() * 0.25;
         const rad = 0.35 + Math.random() * 0.25;
         
-        const satGeo = new THREE.DodecahedronGeometry(rad, 0);
-        
-        // Randomly scale each axis to create unique jagged shapes
+        const satGeo = new THREE.DodecahedronGeometry(rad, 1);
         satGeo.scale(
             0.8 + Math.random() * 0.4,
             0.6 + Math.random() * 0.4,
             0.8 + Math.random() * 0.4
         );
-        
-        // Random rotation
         satGeo.rotateX(Math.random() * Math.PI);
         satGeo.rotateY(Math.random() * Math.PI);
         satGeo.rotateZ(Math.random() * Math.PI);
         
-        // Translate relative to base of main rock
         const px = Math.cos(angle) * dist;
         const py = -0.22 + (Math.random() - 0.5) * 0.12;
         const pz = Math.sin(angle) * dist;
@@ -2449,26 +2536,41 @@ function spawnEnvironmentObjects(scene, terrain) {
     }
     
     const masterRockGeo = BufferGeometryUtils.mergeGeometries(rockClusterGeos, true);
-    
-    // Dispose the sub-geometries to free memory
     rockClusterGeos.forEach(g => {
         if (g !== masterRockGeo) g.dispose();
     });
 
+    // Create master Tropical Bush / Undergrowth Fern cluster geometry
+    const bushClusterGeos = [];
+    for (let b = 0; b < 5; b++) {
+        const bAngle = (b * Math.PI * 2) / 5 + (Math.random() - 0.5) * 0.3;
+        const bDist = (b === 0) ? 0.0 : (0.45 + Math.random() * 0.25);
+        const bRad = (b === 0) ? 0.75 : (0.50 + Math.random() * 0.22);
+        const bGeo = new THREE.DodecahedronGeometry(bRad, 1);
+        bGeo.scale(1.25, 0.65, 1.25);
+        bGeo.translate(Math.cos(bAngle) * bDist, bRad * 0.35, Math.sin(bAngle) * bDist);
+        bushClusterGeos.push(bGeo);
+    }
+    const masterBushGeo = BufferGeometryUtils.mergeGeometries(bushClusterGeos, true);
+    bushClusterGeos.forEach(g => {
+        if (g !== masterBushGeo) g.dispose();
+    });
+
     // Materials
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, flatShading: true, roughness: 0.95 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, flatShading: true, roughness: 0.75, side: THREE.DoubleSide });
-    const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: true, roughness: 0.90 });
-    const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, flatShading: true, roughness: 0.95 });
-    const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, flatShading: true, roughness: 0.85 });
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6, flatShading: true, roughness: 0.95 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x9c8874, flatShading: false, roughness: 0.92 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e8b3c, flatShading: false, roughness: 0.65, side: THREE.DoubleSide });
+    const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: false, roughness: 0.85 });
+    const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x7a6552, flatShading: false, roughness: 0.92 });
+    const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x227a38, flatShading: false, roughness: 0.80 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6e6a63, flatShading: false, roughness: 0.90 });
+    const bushMat = new THREE.MeshStandardMaterial({ color: 0x267830, flatShading: false, roughness: 0.78 });
 
     // Initialize/clear global instance arrays
     palmInstances = [];
     pineInstances = [];
     rockInstances = [];
 
-    // Instanced meshes (assigned to global variables instead of local constants)
+    // Instanced meshes
     instancedPalmsTrunk = new THREE.InstancedMesh(masterPalmTrunkGeo, trunkMat, palmTreesCount);
     instancedPalmsLeaves = new THREE.InstancedMesh(masterPalmLeavesGeo, leafMat, palmTreesCount);
     instancedPalmsCoconuts = new THREE.InstancedMesh(masterPalmCoconutGeo, coconutMat, palmTreesCount);
@@ -2477,6 +2579,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, pineTreesCount);
     
     instancedRocks = new THREE.InstancedMesh(masterRockGeo, rockMat, rocksCount);
+    const instancedBushes = new THREE.InstancedMesh(masterBushGeo, bushMat, bushesCount);
 
     // Configure shadows
     instancedPalmsTrunk.castShadow = true; instancedPalmsTrunk.receiveShadow = true;
@@ -2487,6 +2590,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedPinesFoliage.castShadow = true; instancedPinesFoliage.receiveShadow = true;
     
     instancedRocks.castShadow = true; instancedRocks.receiveShadow = true;
+    instancedBushes.castShadow = true; instancedBushes.receiveShadow = true;
 
     envGroup.add(instancedPalmsTrunk);
     envGroup.add(instancedPalmsLeaves);
@@ -2494,6 +2598,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     envGroup.add(instancedPinesTrunk);
     envGroup.add(instancedPinesFoliage);
     envGroup.add(instancedRocks);
+    envGroup.add(instancedBushes);
     
     const spawnedPositions = [];
     function isFarEnough(x, z, minDist) {
@@ -2505,23 +2610,22 @@ function spawnEnvironmentObjects(scene, terrain) {
         return true;
     }
     
-    // Spawning loop for Palm Trees (placed at lower elevations / beaches)
+    // Spawning loop for Palm Trees (dense tropical clusters on atoll, volcano island & coastal beaches)
     let attempts = 0;
     let treesPlaced = 0;
-    while (treesPlaced < palmTreesCount && attempts < 1500) {
+    while (treesPlaced < palmTreesCount && attempts < 3200) {
         attempts++;
-        const wx = (Math.random() - 0.5) * 700.0;
-        if (wx > 250.0) continue; // Keep eastern islands barren/arid!
-        const wz = (Math.random() - 0.5) * 700.0;
+        const isCoreIsland = (treesPlaced < palmTreesCount * 0.78);
+        const wx = isCoreIsland ? ((Math.random() - 0.5) * 480.0) : ((Math.random() - 0.3) * 1100.0);
+        const wz = isCoreIsland ? ((Math.random() - 0.5) * 650.0) : ((Math.random() - 0.5) * 1100.0);
         
-        // Sample height from global height map
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
         
-        // Spawn range: between 120.5m (beaches) and 125.0m, keeping spacing
-        if (groundHeight > 120.5 && groundHeight < 125.0 && isFarEnough(wx, wz, 5.0)) {
+        // Spawn range: between 120.4m (beaches) and 132.0m (tropical hillsides), keeping natural grove spacing
+        if (groundHeight > 120.4 && groundHeight < 132.0 && isFarEnough(wx, wz, 3.8)) {
             const y = groundHeight - 0.1;
             const rotationY = Math.random() * Math.PI * 2;
-            const sc = 0.8 + Math.random() * 0.45;
+            const sc = 0.78 + Math.random() * 0.52;
             
             const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(sc, sc, sc);
@@ -2548,22 +2652,21 @@ function spawnEnvironmentObjects(scene, terrain) {
         }
     }
     
-    // Spawning loop for Pine Trees (placed at higher/colder elevations)
+    // Spawning loop for Tropical Canopy / Pine Trees (placed on island ridges and slopes)
     attempts = 0;
     let pinesPlaced = 0;
-    while (pinesPlaced < pineTreesCount && attempts < 1000) {
+    while (pinesPlaced < pineTreesCount && attempts < 2000) {
         attempts++;
-        const wx = (Math.random() - 0.5) * 700.0;
-        if (wx > 250.0) continue; // Keep eastern islands barren/arid!
-        const wz = (Math.random() - 0.5) * 700.0;
+        const wx = (Math.random() - 0.35) * 950.0;
+        const wz = (Math.random() - 0.5) * 950.0;
         
         const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
         
-        // Spawn pine trees on mountain slopes (125.0m up to 185.0m)
-        if (groundHeight >= 125.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.5)) {
+        // Spawn canopy trees on slopes (124.0m up to 185.0m)
+        if (groundHeight >= 124.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.2)) {
             const y = groundHeight - 0.15;
             const rotationY = Math.random() * Math.PI * 2;
-            const sc = 0.85 + Math.random() * 0.45;
+            const sc = 0.85 + Math.random() * 0.50;
             
             const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(sc, sc, sc);
@@ -2588,6 +2691,32 @@ function spawnEnvironmentObjects(scene, terrain) {
             pinesPlaced++;
         }
     }
+
+    // Spawning loop for Lush Tropical Undergrowth Bushes
+    attempts = 0;
+    let bushesPlaced = 0;
+    while (bushesPlaced < bushesCount && attempts < 2800) {
+        attempts++;
+        const wx = (Math.random() - 0.45) * 650.0;
+        const wz = (Math.random() - 0.5) * 700.0;
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
+        if (groundHeight >= 121.2 && groundHeight < 155.0) {
+            const y = groundHeight - 0.12;
+            const scX = 0.7 + Math.random() * 0.9;
+            const scY = 0.6 + Math.random() * 0.7;
+            const scZ = 0.7 + Math.random() * 0.9;
+            const rotY = Math.random() * Math.PI * 2;
+            const matrix = new THREE.Matrix4().compose(
+                new THREE.Vector3(wx, y, wz),
+                new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0)),
+                new THREE.Vector3(scX, scY, scZ)
+            );
+            instancedBushes.setMatrixAt(bushesPlaced, matrix);
+            bushesPlaced++;
+        }
+    }
+    instancedBushes.instanceMatrix.needsUpdate = true;
+    instancedBushes.matrixAutoUpdate = false;
  
     // Spawning loop for Rocks
     attempts = 0;

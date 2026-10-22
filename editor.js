@@ -127,13 +127,21 @@ function init() {
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // Ambient and Directional Lighting matching Gameplay
-    const ambientLight = new THREE.AmbientLight(0xdff4ff, 0.85);
+    // Ambient, Hemisphere and Directional Lighting matching Next-Gen Gameplay
+    const ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
     scene.add(ambientLight);
 
-    sun = new THREE.Vector3(120, 280, 150).normalize();
-    const dirLight = new THREE.DirectionalLight(0xfff6e5, 1.6);
-    dirLight.position.set(200, 450, 250);
+    const hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
+    hemiLight.position.set(0, 300, 0);
+    scene.add(hemiLight);
+
+    sun = new THREE.Vector3();
+    const phi = THREE.MathUtils.degToRad(90 - 28.0);
+    const theta = THREE.MathUtils.degToRad(195);
+    sun.setFromSphericalCoords(1, phi, theta);
+
+    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.35);
+    dirLight.position.copy(sun).multiplyScalar(300);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -145,18 +153,104 @@ function init() {
     dirLight.shadow.camera.bottom = -450;
     scene.add(dirLight);
 
-    // Sky Dome matching Gameplay
-    sky = new Sky();
-    sky.scale.setScalar(450000);
-    scene.add(sky);
-    const skyUniforms = sky.material.uniforms;
-    skyUniforms["turbidity"].value = 3.5;
-    skyUniforms["rayleigh"].value = 1.1;
-    skyUniforms["mieCoefficient"].value = 0.005;
-    skyUniforms["mieDirectionalG"].value = 0.8;
-    skyUniforms["sunPosition"].value.copy(dirLight.position);
+    // Photorealistic Tropical Sky Dome with Volumetric Cumulus Clouds matching Gameplay
+    const skyGeo = new THREE.SphereGeometry(1, 48, 24);
+    const skyMat = new THREE.ShaderMaterial({
+        uniforms: {
+            topColor: { value: new THREE.Color(0x0b5ec9) },
+            bottomColor: { value: new THREE.Color(0x9be2ff) },
+            exponent: { value: 0.55 },
+            sunDirection: { value: sun.clone() },
+            starIntensity: { value: 0.0 },
+            uTime: { value: 0.0 }
+        },
+        vertexShader: `
+            varying vec3 vWorldPosition;
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                gl_Position.z = gl_Position.w;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vWorldPosition;
+            uniform vec3 topColor;
+            uniform vec3 bottomColor;
+            uniform float exponent;
+            uniform vec3 sunDirection;
+            uniform float starIntensity;
+            uniform float uTime;
 
-    // Realistic Planetary Ocean Plane with Horizon Curvature (Matching main.js V 0.201)
+            float hash21(vec2 p) {
+                p = fract(p * vec2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return fract(p.x * p.y);
+            }
+            float noise2D(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = hash21(i);
+                float b = hash21(i + vec2(1.0, 0.0));
+                float c = hash21(i + vec2(0.0, 1.0));
+                float d = hash21(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+            float fbmCloud(vec2 p) {
+                float v = 0.0;
+                float amp = 0.5;
+                mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+                for (int i = 0; i < 5; i++) {
+                    v += amp * noise2D(p);
+                    p = rot * p * 2.03 + vec2(13.7, 29.1);
+                    amp *= 0.5;
+                }
+                return v;
+            }
+            void main() {
+                vec3 dir = normalize(vWorldPosition);
+                vec3 sunDir = normalize(sunDirection);
+                float h = dir.y;
+                float sunGlow = max(0.0, dot(dir, sunDir));
+                vec3 skyColor = (h >= 0.0) ? mix(bottomColor, topColor, pow(h, exponent)) : mix(bottomColor, vec3(0.003, 0.015, 0.035), pow(clamp(-h * 4.5, 0.0, 1.0), 0.7));
+                if (h >= 0.0) {
+                    float horizonGlow = pow(1.0 - h, 3.5);
+                    skyColor += vec3(1.0, 0.88, 0.68) * pow(sunGlow, 3.0) * 0.42 * (0.5 + 0.5 * horizonGlow);
+                }
+                float cloudVis = smoothstep(0.015, 0.14, h);
+                if (cloudVis > 0.001 && h > 0.01) {
+                    vec2 cloudUV = dir.xz / (h + 0.13);
+                    vec2 wind = vec2(uTime * 0.012, uTime * 0.005);
+                    float baseN = fbmCloud(cloudUV * 0.65 + wind);
+                    float detailN = fbmCloud(cloudUV * 1.85 - wind * 1.4);
+                    float cloudShape = baseN * 0.72 + detailN * 0.28;
+                    float cloudDensity = smoothstep(0.47, 0.72, cloudShape);
+                    if (cloudDensity > 0.001) {
+                        vec2 sunStep = normalize(sunDir.xz + vec2(0.0001)) * 0.16;
+                        float shadowSample = fbmCloud((cloudUV + sunStep) * 0.65 + wind);
+                        float selfShadow = clamp((shadowSample - cloudShape) * 3.2 + 0.5, 0.0, 1.0);
+                        float topLight = clamp(1.0 - selfShadow * 0.75 + detailN * 0.25, 0.0, 1.0);
+                        float mieLining = pow(sunGlow, 8.0) * (1.0 - cloudDensity * 0.5) * 0.65;
+                        vec3 cloudCol = mix(vec3(0.62, 0.71, 0.82), vec3(1.0, 0.98, 0.94), topLight) + vec3(1.0, 0.90, 0.70) * mieLining;
+                        cloudCol = mix(bottomColor * 1.04, cloudCol, 0.35 + 0.65 * smoothstep(0.015, 0.22, h));
+                        skyColor = mix(skyColor, cloudCol, cloudDensity * cloudVis * 0.92);
+                    }
+                }
+                skyColor += vec3(1.0, 0.96, 0.86) * smoothstep(0.9982, 0.9997, sunGlow) * 2.2;
+                skyColor += vec3(1.0, 0.88, 0.62) * pow(sunGlow, 18.0) * 0.38;
+                skyColor += vec3(1.0, 0.82, 0.55) * pow(sunGlow, 4.5) * 0.14;
+                gl_FragColor = vec4(skyColor, 1.0);
+            }
+        `,
+        side: THREE.BackSide,
+        depthWrite: false
+    });
+    sky = new THREE.Mesh(skyGeo, skyMat);
+    sky.scale.setScalar(35000);
+    scene.add(sky);
+
+    // Next-Gen Bathymetric Tropical Ocean Plane with Reefs, Shore Foam & Horizon Curvature
     const waterNormalsTexture = new THREE.TextureLoader().load("waternormals.jpg", function (texture) {
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -164,23 +258,24 @@ function init() {
         texture.generateMipmaps = true;
     });
 
-    const waterGeometry = new THREE.CircleGeometry(3200, 128);
+    const waterGeometry = new THREE.CircleGeometry(3200, 160);
     water = new Water(waterGeometry, {
         textureWidth: 512,
         textureHeight: 512,
         waterNormals: waterNormalsTexture,
         sunDirection: sun,
-        sunColor: 0xffdfaa,
-        waterColor: 0x005a78,
-        distortionScale: 1.5,
-        alpha: 0.96
+        sunColor: 0xffe6b8,
+        waterColor: 0x004e75,
+        distortionScale: 1.8,
+        alpha: 0.98,
+        fog: scene.fog !== undefined
     });
     water.rotation.x = -Math.PI / 2;
     water.position.set(0, 120.0, 0); // Sea level at Y = 120.0m
     water.material.side = THREE.DoubleSide;
     water.material.transparent = true;
 
-    // Inject planetary curvature into water shader
+    // Inject planetary curvature & bathymetric reef/foam shader into water
     const cameraPosUniform = { value: new THREE.Vector3() };
     water.material.uniforms["cameraPos"] = cameraPosUniform;
     water.material.vertexShader = `
@@ -203,6 +298,82 @@ function init() {
          worldPosition = mirrorCoord.xyzw;
          mirrorCoord = textureMatrix * mirrorCoord;
          vec4 mvPosition = modelViewMatrix * vec4( curvedPos, 1.0 );`
+    );
+
+    water.material.fragmentShader = `
+        uniform vec3 cameraPos;
+        float wHash21(vec2 p) {
+            p = fract(p * vec2(127.1, 311.7));
+            p += dot(p, p + 34.5);
+            return fract(p.x * p.y);
+        }
+        float wNoise2(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(
+                mix(wHash21(i), wHash21(i + vec2(1.0, 0.0)), f.x),
+                mix(wHash21(i + vec2(0.0, 1.0)), wHash21(i + vec2(1.0, 1.0)), f.x),
+                f.y
+            );
+        }
+        float wFbm(vec2 p) {
+            float v = 0.0;
+            v += 0.50 * wNoise2(p); p *= 2.04;
+            v += 0.25 * wNoise2(p); p *= 2.02;
+            v += 0.125 * wNoise2(p); p *= 2.03;
+            v += 0.0625 * wNoise2(p);
+            return v;
+        }
+    ` + water.material.fragmentShader;
+
+    water.material.fragmentShader = water.material.fragmentShader.replace(
+        "gl_FragColor = vec4( outgoingLight, alpha );",
+        `float distAlpha = alpha;
+         vec3 finalColor = outgoingLight;
+         if (eye.y >= worldPosition.y) {
+             vec2 vxvz = worldPosition.xz / 3.0;
+             float distCenter = length(vxvz);
+             float distAtoll = abs(distCenter - 38.0);
+             float wAtoll = max(0.0, 1.0 - distAtoll / 22.0);
+             if (distCenter < 38.0) wAtoll = max(0.45, wAtoll);
+             vec2 dVol = vec2(vxvz.x, (vxvz.y - 95.0) * (vxvz.y < 95.0 ? 0.5 : 1.0));
+             float wVol = max(0.0, 1.0 - length(dVol) / 42.0);
+             float dA = length((vxvz - vec2(250.0, 240.0)) * vec2(1.15, 0.85));
+             float dB = length((vxvz - vec2(220.0, 20.0)) * vec2(1.10, 0.95));
+             float dC = length((vxvz - vec2(260.0, -220.0)) * vec2(1.15, 0.70));
+             float wEast = max(max(max(0.0, 1.0 - dA / 128.0), max(0.0, 1.0 - dB / 108.0)), max(0.0, 1.0 - dC / 158.0));
+             float landProx = max(max(wAtoll, wVol), wEast);
+             float waterDepth = clamp((1.0 - landProx) * 28.0, 0.0, 28.0);
+             if (distCenter < 36.0) {
+                 waterDepth = mix(2.2, 8.5, clamp((36.0 - distCenter) / 36.0, 0.0, 1.0));
+             }
+             float shallowT = exp(-waterDepth * 0.24);
+             float midT     = exp(-waterDepth * 0.085);
+             float reefNoise = wFbm(worldPosition.xz * 0.045);
+             float reefFine  = wNoise2(worldPosition.xz * 0.22);
+             float coralMask = smoothstep(0.45, 0.66, reefNoise) * smoothstep(11.0, 1.2, waterDepth);
+             vec3 shallowSandCol = vec3(0.08, 0.92, 0.88) * (0.92 + 0.16 * reefFine);
+             vec3 coralReefCol   = vec3(0.01, 0.26, 0.34) * (0.85 + 0.30 * reefFine);
+             vec3 shallowLagoon  = mix(shallowSandCol, coralReefCol, coralMask * 0.78);
+             vec3 tropicWaterCol = mix(mix(vec3(0.01, 0.18, 0.40), vec3(0.00, 0.56, 0.78), midT), shallowLagoon, shallowT);
+             vec3 viewDir = normalize(eye - worldPosition.xyz);
+             float fresnel = clamp(pow(1.0 - max(0.0, dot(surfaceNormal, viewDir)), 3.2), 0.08, 0.78);
+             finalColor = mix(tropicWaterCol, outgoingLight * 1.08, fresnel * (0.35 + 0.65 * (1.0 - shallowT)));
+             vec3 halfVec = normalize(normalize(sunDirection) + viewDir);
+             float NdotH = max(0.0, dot(surfaceNormal, halfVec));
+             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.6 + pow(NdotH, 32.0) * 0.38);
+             float wavePhase = sin(waterDepth * 3.8 - time * 6.5 + reefNoise * 4.0);
+             float foamNoise = wFbm(worldPosition.xz * 0.35 + vec2(time * 0.4, -time * 0.3));
+             float edgeFoam  = smoothstep(1.35, 0.05, waterDepth) * smoothstep(0.22, 0.58, foamNoise + (1.0 - waterDepth / 1.35) * 0.45);
+             float crestFoam = smoothstep(2.6, 0.3, waterDepth) * smoothstep(0.62, 0.92, wavePhase * 0.5 + 0.5) * smoothstep(0.38, 0.72, foamNoise) * 0.65;
+             float totalFoam = clamp(edgeFoam + crestFoam, 0.0, 1.0);
+             finalColor = mix(finalColor, vec3(0.96, 0.99, 1.0), totalFoam);
+             distAlpha = max(mix(0.52, alpha, smoothstep(0.0, 5.5, waterDepth)), totalFoam * 0.96);
+         }
+         float distH = length(worldPosition.xz - cameraPos.xz);
+         float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
+         gl_FragColor = vec4( finalColor, distAlpha * horizonAlpha );`
     );
 
     scene.add(water);
@@ -1060,11 +1231,20 @@ function animate() {
         camera.rotation.set(-Math.PI / 2 + 0.01, 0, 0);
     }
 
-    // 2. Keep Water Plane Centered horizontally & update waves
+    // 2. Keep Water & Sky Centered horizontally & update waves/clouds
     water.material.uniforms["time"].value += delta * 0.12;
     water.material.uniforms["cameraPos"].value.copy(camera.position);
     water.position.x = camera.position.x;
     water.position.z = camera.position.z;
+    if (terrain && terrain.cameraPos) {
+        terrain.cameraPos.copy(camera.position);
+    }
+    if (sky) {
+        sky.position.copy(camera.position);
+        if (sky.material && sky.material.uniforms && sky.material.uniforms["uTime"]) {
+            sky.material.uniforms["uTime"].value += delta;
+        }
+    }
 
     // 3. Adaptive Atmospheric Fog matching Planetary Biome
     if (terrain.getPlanetaryAtmosphereColor) {

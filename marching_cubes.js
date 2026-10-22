@@ -106,13 +106,13 @@ class PerlinNoise {
 // TERRAIN HELPERS & STATIC ALLOCATIONS
 // ==========================================
 // 1. Tropical Island Lagoon & Coral Atolls
-const _sandColor = new THREE.Color(0xf0ebd8); // Soft warm white coral sand
-const _goldenSandColor = new THREE.Color(0xe0b970); // Warm golden sand for eastern islands
-const _grassColor = new THREE.Color(0x4cd137); // Bright tropical lime green
-const _barrenColor = new THREE.Color(0x948366); // Dry, barren dirt/scrub for eastern islands
-const _rockColor = new THREE.Color(0x95a5a6);  // Soft light grey granite rock
-const _seabedColor = new THREE.Color(0x086b7c); // Rich tropical turquoise-blue seabed reef
-const _abyssRockColor = new THREE.Color(0x0c1b26); // Deep abyssal ocean basalt rock
+const _sandColor = new THREE.Color(0xf4ead2); // Warm sunlit coral beach sand
+const _goldenSandColor = new THREE.Color(0xebd29b); // Warm golden sand for eastern islands
+const _grassColor = new THREE.Color(0x2f8f38); // Lush deep tropical jungle green
+const _barrenColor = new THREE.Color(0x367d39); // Rich tropical island hillside foliage for eastern archipelago
+const _rockColor = new THREE.Color(0x7c776e);  // Natural weathered volcanic/limestone cliff rock
+const _seabedColor = new THREE.Color(0x0b8a99); // Bright tropical turquoise lagoon reef
+const _abyssRockColor = new THREE.Color(0x071726); // Deep abyssal ocean basalt rock
 
 // 2. Continental Idyllic Beaches
 const _beachSandColor = new THREE.Color(0xf5dfa6); // Fine golden champagne beach sand
@@ -632,14 +632,156 @@ export class VoxelTerrain {
             enableForests: true             // Toggle temperate forests & woodlands
         };
 
-        // Core terrain material with Vertex Colors and flat low-poly shading
+        // Camera position uniform for planetary horizon curvature & detail LOD
+        this.cameraPos = new THREE.Vector3();
+
+        // Next-Gen Terrain Material with Smooth Normals + Procedural Triplanar Detail Shader
         this.material = new THREE.MeshStandardMaterial({
             vertexColors: true,
-            roughness: 0.9,
-            metalness: 0.05,
-            flatShading: true, // Crucial for low-poly faceted look!
+            roughness: 0.85,
+            metalness: 0.04,
+            flatShading: false, // Smooth organic shading with procedural normal bump detail
             side: THREE.FrontSide
         });
+
+        this.material.onBeforeCompile = (shader) => {
+            shader.uniforms.uCameraPos = { value: this.cameraPos };
+
+            shader.vertexShader = `
+                uniform vec3 uCameraPos;
+                varying vec3 vMCWorldPos;
+                varying vec3 vMCTerrainNormal;
+            ` + shader.vertexShader;
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `#include <begin_vertex>
+                 vec4 mcWorldInit = modelMatrix * vec4(transformed, 1.0);
+                 vMCWorldPos = mcWorldInit.xyz;
+                 vMCTerrainNormal = normalize(mat3(modelMatrix) * objectNormal);
+                 float mcDistH = length(mcWorldInit.xz - uCameraPos.xz);
+                 float mcPlanetR = 1800000.0;
+                 if (mcDistH < mcPlanetR) {
+                     float mcDrop = mcPlanetR - sqrt(mcPlanetR * mcPlanetR - mcDistH * mcDistH);
+                     transformed.y -= mcDrop;
+                 }`
+            );
+
+            shader.fragmentShader = `
+                varying vec3 vMCWorldPos;
+                varying vec3 vMCTerrainNormal;
+
+                float mcHash31(vec3 p) {
+                    p = fract(p * vec3(443.897, 441.423, 437.195));
+                    p += dot(p, p.yzx + 19.19);
+                    return fract((p.x + p.y) * p.z);
+                }
+
+                float mcNoise3(vec3 p) {
+                    vec3 i = floor(p);
+                    vec3 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(
+                        mix(mix(mcHash31(i + vec3(0,0,0)), mcHash31(i + vec3(1,0,0)), f.x),
+                            mix(mcHash31(i + vec3(0,1,0)), mcHash31(i + vec3(1,1,0)), f.x), f.y),
+                        mix(mix(mcHash31(i + vec3(0,0,1)), mcHash31(i + vec3(1,0,1)), f.x),
+                            mix(mcHash31(i + vec3(0,1,1)), mcHash31(i + vec3(1,1,1)), f.x), f.y),
+                        f.z
+                    );
+                }
+
+                float mcFbm3(vec3 p) {
+                    float v = 0.0;
+                    v += 0.500 * mcNoise3(p); p *= 2.03;
+                    v += 0.250 * mcNoise3(p); p *= 2.01;
+                    v += 0.125 * mcNoise3(p); p *= 2.02;
+                    v += 0.0625 * mcNoise3(p);
+                    return v;
+                }
+            ` + shader.fragmentShader;
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <color_fragment>',
+                `#include <color_fragment>
+                 float wy = vMCWorldPos.y;
+                 float slope = clamp(vMCTerrainNormal.y, 0.0, 1.0);
+
+                 // Multi-scale 3D procedural noise for rock strata, foliage & sand grain
+                 float nMacro = mcFbm3(vMCWorldPos * 0.045);
+                 float nMed   = mcFbm3(vMCWorldPos * 0.22);
+                 float nFine  = mcNoise3(vMCWorldPos * 1.35);
+                 float nMicro = mcNoise3(vMCWorldPos * 5.5);
+
+                 // 1. Craggy Stratified Rock Cliffs (steep slopes or high peaks)
+                 float rockMask = smoothstep(0.76, 0.52, slope);
+                 float strata = sin(wy * 1.45 + nMed * 5.0) * 0.5 + 0.5;
+                 float crevice = smoothstep(0.32, 0.68, nMed * 0.7 + nFine * 0.3);
+                 vec3 darkRock = vec3(0.18, 0.17, 0.16);
+                 vec3 midRock  = vec3(0.46, 0.43, 0.39);
+                 vec3 lightRock = vec3(0.66, 0.62, 0.56);
+                 vec3 rockCol = mix(darkRock, midRock, crevice);
+                 rockCol = mix(rockCol, lightRock, strata * 0.55 + nMicro * 0.15);
+                 // Subtle moss in damp horizontal rock ledges
+                 float ledgeMoss = smoothstep(0.55, 0.78, slope) * smoothstep(0.45, 0.75, nMacro) * smoothstep(123.0, 130.0, wy);
+                 rockCol = mix(rockCol, vec3(0.18, 0.36, 0.15), ledgeMoss * 0.65);
+
+                 // 2. Lush Multi-Tone Tropical Grass & Jungle Undergrowth
+                 vec3 deepJungle = vec3(0.10, 0.34, 0.13);
+                 vec3 lushGrass  = vec3(0.22, 0.52, 0.17);
+                 vec3 sunlitLeaf = vec3(0.38, 0.62, 0.20);
+                 vec3 vegCol = mix(deepJungle, lushGrass, smoothstep(0.28, 0.72, nMacro));
+                 vegCol = mix(vegCol, sunlitLeaf, smoothstep(0.45, 0.80, nMed) * 0.65);
+                 vegCol *= (0.88 + 0.24 * nFine);
+
+                 // 3. Warm Coral & Golden Beach Sand with Wet Shoreline Band
+                 vec3 drySand = mix(vec3(0.94, 0.88, 0.74), vec3(0.86, 0.76, 0.58), nMed * 0.6 + nMicro * 0.25);
+                 float wetZone = smoothstep(121.35, 119.95, wy);
+                 vec3 sandCol = mix(drySand, drySand * vec3(0.64, 0.62, 0.58), wetZone);
+
+                 // 4. Underwater Coral Reef & Turquoise Lagoon Shallows (< 120.0m)
+                 if (wy < 120.0) {
+                     float waterDepth = 120.0 - wy;
+                     float coralPatch = smoothstep(0.42, 0.64, mcFbm3(vMCWorldPos * 0.14));
+                     vec3 lagoonSand = vec3(0.55, 0.88, 0.86) * (0.9 + 0.2 * nFine);
+                     vec3 coralCol = mix(vec3(0.06, 0.24, 0.28), vec3(0.14, 0.36, 0.32), nMed);
+                     vec3 shallowBed = mix(lagoonSand, coralCol, coralPatch * 0.78);
+                     float deepFade = clamp(waterDepth / 18.0, 0.0, 1.0);
+                     diffuseColor.rgb = mix(shallowBed, diffuseColor.rgb * (0.75 + 0.35 * nMed), deepFade);
+                 } else if (wy < 126.2) {
+                     // Coastal beach to jungle transition
+                     float grassBlend = smoothstep(123.8 + nMacro * 1.6, 126.0 + nMacro * 1.2, wy);
+                     vec3 coastalSurface = mix(sandCol, vegCol, grassBlend);
+                     diffuseColor.rgb = mix(coastalSurface, rockCol, rockMask);
+                 } else {
+                     // Inland hills, mountains & biome-tinted terrain
+                     // Preserve special biome hues (snow/desert) while injecting rich procedural detail
+                     float isTropicalOrForest = smoothstep(0.15, 0.45, diffuseColor.g - diffuseColor.r * 0.65);
+                     vec3 detailedBase = mix(diffuseColor.rgb * (0.82 + 0.35 * nMed), vegCol, isTropicalOrForest * 0.85);
+                     diffuseColor.rgb = mix(detailedBase, rockCol, rockMask);
+                 }`
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <normal_fragment_maps>',
+                `#include <normal_fragment_maps>
+                 // Procedural 3D Bump / Normal Perturbation for craggy rocks and lush foliage
+                 vec3 bumpPos = vMCWorldPos * mix(0.85, 0.42, rockMask);
+                 float eps = 0.12;
+                 float h0 = mcFbm3(bumpPos);
+                 float hx = mcFbm3(bumpPos + vec3(eps, 0.0, 0.0)) - h0;
+                 float hy = mcFbm3(bumpPos + vec3(0.0, eps, 0.0)) - h0;
+                 float hz = mcFbm3(bumpPos + vec3(0.0, 0.0, eps)) - h0;
+                 float bumpStrength = mix(0.14, 0.42, rockMask) * smoothstep(119.5, 121.5, wy);
+                 normal = normalize(normal - vec3(hx, hy, hz) * (bumpStrength / eps));`
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <roughnessmap_fragment>',
+                `#include <roughnessmap_fragment>
+                 float shorelineGloss = smoothstep(121.2, 119.9, vMCWorldPos.y) * step(119.8, vMCWorldPos.y);
+                 roughnessFactor = mix(roughnessFactor, 0.22, shorelineGloss);`
+            );
+        };
 
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
@@ -1140,16 +1282,17 @@ export class VoxelTerrain {
         // Calculate hill heights
         let hillHeight = 0;
         
-        // Atoll hill height
+        // Atoll hill height with scenic rocky crags and low sandy motu passes
         if (distFromAtoll < 22.0) {
             const t = 1.0 - distFromAtoll / 22.0;
-            hillHeight = Math.max(hillHeight, 11.0 * Math.pow(t, 1.3));
+            const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(x * 0.038, z * 0.038) * 3.8);
+            hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
         }
         
         // Volcano hill height with a central crater bowl (lower and flatter)
         if (distToVolcano < 42.0) {
             const t = 1.0 - distToVolcano / 42.0;
-            let vHill = 9.0 * Math.pow(t, 1.3); // Lower height (9 voxels max, around 27m above base height)
+            let vHill = 10.5 * Math.pow(t, 1.25);
             
             // Subtract a bowl for the crater at the very center of the volcano island (distance < 10 voxels)
             if (distToVolcano < 10.0) {
@@ -1159,11 +1302,12 @@ export class VoxelTerrain {
             hillHeight = Math.max(hillHeight, vHill);
         }
         
-        // Eastern islands hill height (slightly hilly with broad flat plains and rolling plateaus)
+        // Eastern islands hill height (dramatic tropical volcanic ridges and peaks like Image 2)
         if (x > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(eastIslandWeight, 1.3);
-            const hillNoise = this.noise.noise2d(x * 0.025, z * 0.025) * 2.5;
-            const eHill = Math.max(0.0, t * 10.0 + hillNoise); // max elevation ~30m above base
+            const t = Math.pow(eastIslandWeight, 1.25);
+            const ridge = 1.0 - Math.abs(this.noise.noise2d(x * 0.018, z * 0.018));
+            const hillNoise = this.noise.noise2d(x * 0.03, z * 0.03) * 3.0;
+            const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
             hillHeight = Math.max(hillHeight, eHill);
         }
 
@@ -1187,12 +1331,16 @@ export class VoxelTerrain {
             density = 1.0;
         }
         
-        // Add 3D bumpy noise for organic detail
-        const noiseY = y >= 40 ? (y - 32) : (y * 0.2);
-        const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
-        if (noiseY > 1 && noiseY < finalHeightAbove + 2) {
-            const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.8;
-            density += bumpyNoise;
+        // Add 3D bumpy noise ONLY on elevated hills/cliffs above the beach waterline (y > 40.8)
+        // This prevents 3D noise blobs from poking through shallow water as ugly grey floating blotches!
+        if (y > 40.8) {
+            const noiseY = y - 32.0;
+            const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
+            if (noiseY < finalHeightAbove + 2.0) {
+                const aboveWaterMask = Math.min(1.0, (y - 40.8) / 2.2);
+                const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.65 * aboveWaterMask;
+                density += bumpyNoise;
+            }
         }
         
         // Keep ocean bedrock floor solid at y <= -131 (512m depth)
@@ -1209,12 +1357,24 @@ export class VoxelTerrain {
     }
 
     hasPotentialTerrain(cx, cy, cz) {
-        if (cy === this.minChunkY) return true; // Seabed floor is solid at minChunkY
-        
         const startX = cx * this.chunkSize;
         const endX = startX + this.chunkSize;
         const startZ = cz * this.chunkSize;
         const endZ = startZ + this.chunkSize;
+
+        // Underground chunks below the natural seabed (cy < 0, y <= 0) are 100% solid bedrock
+        // and produce 0 triangles unless a player has dug into this column!
+        if (cy < 0) {
+            if (this.modifiedColumns.size > 0) {
+                for (let x = startX; x <= endX; x += 2) {
+                    for (let z = startZ; z <= endZ; z += 2) {
+                        if (this.modifiedColumns.has(`${x},${z}`)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         const midX = (startX + endX) * 0.5;
         const midZ = (startZ + endZ) * 0.5;
 
@@ -1223,18 +1383,23 @@ export class VoxelTerrain {
         const yTop = yBottom + this.chunkSize;
         const yMid = yBottom + this.chunkSize * 0.5;
 
-        if (this.getBaseDensity(midX, yBottom, midZ) > -0.92) return true;
-        if (this.getBaseDensity(midX, yMid, midZ) > -0.92) return true;
-        if (this.getBaseDensity(startX, yBottom, startZ) > -0.92) return true;
-        if (this.getBaseDensity(endX, yBottom, startZ) > -0.92) return true;
-        if (this.getBaseDensity(startX, yBottom, endZ) > -0.92) return true;
-        if (this.getBaseDensity(endX, yBottom, endZ) > -0.92) return true;
-        if (this.getBaseDensity(midX, yTop, midZ) > -0.92) return true;
+        const d0 = this.getBaseDensity(midX, yBottom, midZ);
+        const d1 = this.getBaseDensity(midX, yMid, midZ);
+        const d2 = this.getBaseDensity(startX, yBottom, startZ);
+        const d3 = this.getBaseDensity(endX, yBottom, startZ);
+        const d4 = this.getBaseDensity(startX, yBottom, endZ);
+        const d5 = this.getBaseDensity(endX, yBottom, endZ);
+        const d6 = this.getBaseDensity(midX, yTop, midZ);
+
+        // If any sample is near or above the surface and not 100% buried solid
+        const hasSolid = (d0 > -0.92 || d1 > -0.92 || d2 > -0.92 || d3 > -0.92 || d4 > -0.92 || d5 > -0.92 || d6 > -0.92);
+        const hasAir   = (d0 < 1.5 || d1 < 1.5 || d2 < 1.5 || d3 < 1.5 || d4 < 1.5 || d5 < 1.5 || d6 < 1.5);
+        if (hasSolid && hasAir) return true;
 
         // Check if any modified voxels exist in this chunk
         if (this.modifiedColumns.size > 0) {
-            for (let x = startX; x <= endX; x += 4) {
-                for (let z = startZ; z <= endZ; z += 4) {
+            for (let x = startX; x <= endX; x += 2) {
+                for (let z = startZ; z <= endZ; z += 2) {
                     if (this.modifiedColumns.has(`${x},${z}`)) return true;
                 }
             }
@@ -1648,11 +1813,12 @@ export class VoxelTerrain {
         let hillHeight = 0;
         if (distFromAtoll < 22.0) {
             const t = 1.0 - distFromAtoll / 22.0;
-            hillHeight = Math.max(hillHeight, 11.0 * Math.pow(t, 1.3));
+            const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(vx * 0.038, vz * 0.038) * 3.8);
+            hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
         }
         if (distToVolcano < 42.0) {
             const t = 1.0 - distToVolcano / 42.0;
-            let vHill = 9.0 * Math.pow(t, 1.3);
+            let vHill = 10.5 * Math.pow(t, 1.25);
             if (distToVolcano < 10.0) {
                 const craterT = 1.0 - distToVolcano / 10.0;
                 vHill -= 4.5 * Math.pow(craterT, 1.5);
@@ -1660,30 +1826,23 @@ export class VoxelTerrain {
             hillHeight = Math.max(hillHeight, vHill);
         }
         if (vx > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(eastIslandWeight, 1.3);
-            const hillNoise = this.noise.noise2d(vx * 0.025, vz * 0.025) * 2.5;
-            const eHill = Math.max(0.0, t * 10.0 + hillNoise);
+            const t = Math.pow(eastIslandWeight, 1.25);
+            const ridge = 1.0 - Math.abs(this.noise.noise2d(vx * 0.018, vz * 0.018));
+            const hillNoise = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.0;
+            const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
             hillHeight = Math.max(hillHeight, eHill);
         }
         if (globalLand.hill > 0.0) {
             hillHeight = Math.max(hillHeight, globalLand.hill);
         }
         
-        let estimatedY = 0;
         const yAbove = 32.0 + (baseHeightRaw + hillHeight) * smoothWeightAbove;
         if (yAbove >= 40.0) {
-            estimatedY = yAbove;
-        } else {
-            const distAtollEdge = Math.max(0.0, distFromAtoll - 22.0);
-            const distVolcanoEdge = Math.max(0.0, distToVolcano - 42.0);
-            const distEastEdge = Math.max(0.0, Math.min(distA - 120.0, Math.min(distB - 100.0, distC - 150.0)));
-            const distToCoast = Math.min(distAtollEdge, Math.min(distVolcanoEdge, distEastEdge));
-            const coastBlend = Math.max(0.0, Math.min(1.0, 1.0 - distToCoast / 160.0));
-            const smoothCoast = coastBlend * coastBlend * (3.0 - 2.0 * coastBlend);
-            estimatedY = -131.0 + (40.0 - (-131.0)) * smoothCoast;
+            return yAbove;
         }
-        
-        return Math.floor(estimatedY);
+        // Continuous shallow-to-deep bathymetry for smooth heightmap & turquoise lagoon rendering
+        const yBelow = (baseHeightRaw + hillHeight) * smoothWeightBelow * 5.0;
+        return Math.max(0.0, Math.min(39.95, yBelow));
     }
 }
 
