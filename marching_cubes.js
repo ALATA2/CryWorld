@@ -169,11 +169,12 @@ const _tempColor1 = new THREE.Color();
 const _tempColor2 = new THREE.Color();
 
 function vertexInterpolate(isolevel, p1, p2, val1, val2, target) {
+    if (!Number.isFinite(val1) || !Number.isFinite(val2)) return target.copy(p1);
     if (Math.abs(isolevel - val1) < 0.00001) return target.copy(p1);
     if (Math.abs(isolevel - val2) < 0.00001) return target.copy(p2);
     if (Math.abs(val1 - val2) < 0.00001) return target.copy(p1);
     
-    const mu = (isolevel - val1) / (val2 - val1);
+    const mu = Math.max(0.0, Math.min(1.0, (isolevel - val1) / (val2 - val1)));
     return target.set(
         p1.x + mu * (p2.x - p1.x),
         p1.y + mu * (p2.y - p1.y),
@@ -191,7 +192,7 @@ function getNormalAt(terrain, vx, vy, vz, target) {
     const dz = terrain.getDensity(rx, ry, rz + 1) - terrain.getDensity(rx, ry - 1, rz);
     
     const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
-    if (len === 0) {
+    if (!Number.isFinite(len) || len === 0) {
         return target.set(0, 1, 0);
     }
     return target.set(-dx / len, -dy / len, -dz / len).normalize();
@@ -1124,14 +1125,14 @@ export class VoxelTerrain {
                     const atollDistWithNoise = ringDist + shoreNoise;
                     
                     if (atollDistWithNoise < ringThickness) {
-                        const t = 1.0 - atollDistWithNoise / ringThickness;
-                        islandWeight = Math.max(0.0, t);
+                        const t = Math.max(0.0, 1.0 - atollDistWithNoise / ringThickness);
+                        islandWeight = t;
                         // Gentle sandy ring ridge
                         islandHill = Math.max(islandHill, 9.0 * Math.pow(t, 1.3));
                     }
                     // Shallow coral lagoon inside the atoll ring
                     if (distCenter < atollRadius) {
-                        const lagoonT = 1.0 - distCenter / atollRadius;
+                        const lagoonT = Math.max(0.0, 1.0 - distCenter / atollRadius);
                         islandWeight = Math.max(islandWeight, 0.40 * lagoonT);
                     }
                 }
@@ -1143,15 +1144,15 @@ export class VoxelTerrain {
                     const vDist = Math.sqrt(dx * dx + (dz * stretchZ) * (dz * stretchZ)) + shoreNoise;
                     
                     if (vDist < volcanoRadius) {
-                        const t = 1.0 - vDist / volcanoRadius;
-                        islandWeight = Math.max(0.0, t);
+                        const t = Math.max(0.0, 1.0 - vDist / volcanoRadius);
+                        islandWeight = t;
                         // High conical volcanic elevation (up to 40m - 50m above base)
                         let vHeight = 14.0 * Math.pow(t, 1.25);
                         
                         // Crater bowl depression at center
                         const craterRadius = 12.0 + sizeHash * 6.0;
                         if (vDist < craterRadius) {
-                            const craterT = 1.0 - vDist / craterRadius;
+                            const craterT = Math.max(0.0, 1.0 - Math.max(0.0, vDist) / craterRadius);
                             vHeight -= 7.0 * Math.pow(craterT, 1.4);
                         }
                         islandHill = Math.max(islandHill, vHeight);
@@ -1170,8 +1171,8 @@ export class VoxelTerrain {
                     const mDist = Math.sqrt(rotX * rotX * 0.65 + rotZ * rotZ * 1.35) + shoreNoise;
                     
                     if (mDist < archiRadius) {
-                        const t = 1.0 - mDist / archiRadius;
-                        islandWeight = Math.max(0.0, t);
+                        const t = Math.max(0.0, 1.0 - mDist / archiRadius);
+                        islandWeight = t;
                         
                         // Rolling high peaks and mountain ridges with valleys
                         const ridgeNoise = this.noise.noise2d(rotX * 0.04, rotZ * 0.04) * 5.0;
@@ -1186,9 +1187,9 @@ export class VoxelTerrain {
                     const cDist = distCenter + shoreNoise * 1.4;
                     
                     if (cDist < cragRadius) {
-                        const t = 1.0 - cDist / cragRadius;
+                        const t = Math.max(0.0, 1.0 - cDist / cragRadius);
                         // Sharp threshold for steep cliff walls rising out of the water
-                        islandWeight = Math.max(0.0, Math.pow(t, 0.7));
+                        islandWeight = Math.pow(t, 0.7);
                         // High spire crag
                         const cragSpire = Math.pow(t, 1.1) * 12.0;
                         islandHill = Math.max(islandHill, cragSpire);
@@ -1271,8 +1272,8 @@ export class VoxelTerrain {
         const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
         
         // Smooth falloffs
-        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
-        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.5), 1.2);
+        const smoothWeightAbove = Math.pow(Math.max(0.0, Math.min(1.0, landWeight)), 1.2);
+        const smoothWeightBelow = Math.pow(Math.max(0.0, Math.min(1.0, landWeight * 1.5)), 1.2);
         
         // Base terrain height factor using Perlin Noise fBm
         const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
@@ -1284,19 +1285,19 @@ export class VoxelTerrain {
         
         // Atoll hill height with scenic rocky crags and low sandy motu passes
         if (distFromAtoll < 22.0) {
-            const t = 1.0 - distFromAtoll / 22.0;
+            const t = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
             const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(x * 0.038, z * 0.038) * 3.8);
             hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
         }
         
         // Volcano hill height with a central crater bowl (lower and flatter)
         if (distToVolcano < 42.0) {
-            const t = 1.0 - distToVolcano / 42.0;
+            const t = Math.max(0.0, 1.0 - distToVolcano / 42.0);
             let vHill = 10.5 * Math.pow(t, 1.25);
             
             // Subtract a bowl for the crater at the very center of the volcano island (distance < 10 voxels)
             if (distToVolcano < 10.0) {
-                const craterT = 1.0 - distToVolcano / 10.0;
+                const craterT = Math.max(0.0, 1.0 - Math.max(0.0, distToVolcano) / 10.0);
                 vHill -= 4.5 * Math.pow(craterT, 1.5); // Crater depression
             }
             hillHeight = Math.max(hillHeight, vHill);
@@ -1304,8 +1305,8 @@ export class VoxelTerrain {
         
         // Eastern islands hill height (dramatic tropical volcanic ridges and peaks like Image 2)
         if (x > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(eastIslandWeight, 1.25);
-            const ridge = 1.0 - Math.abs(this.noise.noise2d(x * 0.018, z * 0.018));
+            const t = Math.pow(Math.max(0.0, eastIslandWeight), 1.25);
+            const ridge = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(x * 0.018, z * 0.018)));
             const hillNoise = this.noise.noise2d(x * 0.03, z * 0.03) * 3.0;
             const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
             hillHeight = Math.max(hillHeight, eHill);
@@ -1523,7 +1524,9 @@ export class VoxelTerrain {
         this.modifiedColumns.clear();
         if (data.modifiedVoxels) {
             for (const [key, val] of data.modifiedVoxels) {
-                this.modifiedVoxels.set(key, val);
+                if (Number.isFinite(val)) {
+                    this.modifiedVoxels.set(key, val);
+                }
             }
         }
         if (data.modifiedColumns) {
@@ -1803,8 +1806,8 @@ export class VoxelTerrain {
         const globalLand = this.getGlobalProceduralLand(vx, vz);
         const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
         
-        const smoothWeightAbove = Math.pow(Math.min(1.0, landWeight), 1.2);
-        const smoothWeightBelow = Math.pow(Math.min(1.0, landWeight * 1.5), 1.2);
+        const smoothWeightAbove = Math.pow(Math.max(0.0, Math.min(1.0, landWeight)), 1.2);
+        const smoothWeightBelow = Math.pow(Math.max(0.0, Math.min(1.0, landWeight * 1.5)), 1.2);
         
         const n1 = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.5;
         const n2 = this.noise.noise2d(vx * 0.10, vz * 0.10) * 1.0;
@@ -1812,22 +1815,22 @@ export class VoxelTerrain {
         
         let hillHeight = 0;
         if (distFromAtoll < 22.0) {
-            const t = 1.0 - distFromAtoll / 22.0;
+            const t = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
             const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(vx * 0.038, vz * 0.038) * 3.8);
             hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
         }
         if (distToVolcano < 42.0) {
-            const t = 1.0 - distToVolcano / 42.0;
+            const t = Math.max(0.0, 1.0 - distToVolcano / 42.0);
             let vHill = 10.5 * Math.pow(t, 1.25);
             if (distToVolcano < 10.0) {
-                const craterT = 1.0 - distToVolcano / 10.0;
+                const craterT = Math.max(0.0, 1.0 - Math.max(0.0, distToVolcano) / 10.0);
                 vHill -= 4.5 * Math.pow(craterT, 1.5);
             }
             hillHeight = Math.max(hillHeight, vHill);
         }
         if (vx > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(eastIslandWeight, 1.25);
-            const ridge = 1.0 - Math.abs(this.noise.noise2d(vx * 0.018, vz * 0.018));
+            const t = Math.pow(Math.max(0.0, eastIslandWeight), 1.25);
+            const ridge = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(vx * 0.018, vz * 0.018)));
             const hillNoise = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.0;
             const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
             hillHeight = Math.max(hillHeight, eHill);
