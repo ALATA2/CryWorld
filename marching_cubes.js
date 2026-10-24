@@ -713,50 +713,53 @@ export class VoxelTerrain {
                  float nFine  = mcNoise3(vMCWorldPos * 1.35);
                  float nMicro = mcNoise3(vMCWorldPos * 5.5);
 
-                 // 1. Craggy Stratified Rock Cliffs (steep slopes or high peaks)
+                 // 1. Craggy Stratified Rock Cliffs (Linear color space for rich warm contrast)
                  float rockMask = smoothstep(0.76, 0.52, slope);
                  float strata = sin(wy * 1.45 + nMed * 5.0) * 0.5 + 0.5;
                  float crevice = smoothstep(0.32, 0.68, nMed * 0.7 + nFine * 0.3);
-                 vec3 darkRock = vec3(0.18, 0.17, 0.16);
-                 vec3 midRock  = vec3(0.46, 0.43, 0.39);
-                 vec3 lightRock = vec3(0.66, 0.62, 0.56);
+                 vec3 darkRock  = vec3(0.05, 0.045, 0.04);
+                 vec3 midRock   = vec3(0.20, 0.175, 0.145);
+                 vec3 lightRock = vec3(0.40, 0.355, 0.295);
                  vec3 rockCol = mix(darkRock, midRock, crevice);
                  rockCol = mix(rockCol, lightRock, strata * 0.55 + nMicro * 0.15);
-                 // Subtle moss in damp horizontal rock ledges
                  float ledgeMoss = smoothstep(0.55, 0.78, slope) * smoothstep(0.45, 0.75, nMacro) * smoothstep(123.0, 130.0, wy);
-                 rockCol = mix(rockCol, vec3(0.18, 0.36, 0.15), ledgeMoss * 0.65);
+                 rockCol = mix(rockCol, vec3(0.04, 0.14, 0.03), ledgeMoss * 0.65);
 
-                 // 2. Lush Multi-Tone Tropical Grass & Jungle Undergrowth
-                 vec3 deepJungle = vec3(0.10, 0.34, 0.13);
-                 vec3 lushGrass  = vec3(0.22, 0.52, 0.17);
-                 vec3 sunlitLeaf = vec3(0.38, 0.62, 0.20);
+                 // 2. Lush Multi-Tone Tropical Grass & Jungle Undergrowth (Linear color space)
+                 vec3 deepJungle = vec3(0.018, 0.11, 0.022);
+                 vec3 lushGrass  = vec3(0.055, 0.24, 0.035);
+                 vec3 sunlitLeaf = vec3(0.14,  0.35, 0.045);
                  vec3 vegCol = mix(deepJungle, lushGrass, smoothstep(0.28, 0.72, nMacro));
                  vegCol = mix(vegCol, sunlitLeaf, smoothstep(0.45, 0.80, nMed) * 0.65);
                  vegCol *= (0.88 + 0.24 * nFine);
 
-                 // 3. Warm Coral & Golden Beach Sand with Wet Shoreline Band
-                 vec3 drySand = mix(vec3(0.94, 0.88, 0.74), vec3(0.86, 0.76, 0.58), nMed * 0.6 + nMicro * 0.25);
-                 float wetZone = smoothstep(121.35, 119.95, wy);
-                 vec3 sandCol = mix(drySand, drySand * vec3(0.64, 0.62, 0.58), wetZone);
+                 // 3. Warm Golden-Coral Tropical Beach Sand with Wet Shoreline Band (Linear color space)
+                 vec3 drySand = mix(vec3(0.85, 0.68, 0.40), vec3(0.68, 0.50, 0.25), nMed * 0.6 + nMicro * 0.25);
+                 float wetZone = smoothstep(121.1, 119.95, wy);
+                 vec3 sandCol = mix(drySand, drySand * vec3(0.52, 0.48, 0.42), wetZone);
 
                  // 4. Underwater Coral Reef & Turquoise Lagoon Shallows (< 120.0m)
                  if (wy < 120.0) {
                      float waterDepth = 120.0 - wy;
-                     float coralPatch = smoothstep(0.42, 0.64, mcFbm3(vMCWorldPos * 0.14));
-                     vec3 lagoonSand = vec3(0.55, 0.88, 0.86) * (0.9 + 0.2 * nFine);
-                     vec3 coralCol = mix(vec3(0.06, 0.24, 0.28), vec3(0.14, 0.36, 0.32), nMed);
-                     vec3 shallowBed = mix(lagoonSand, coralCol, coralPatch * 0.78);
-                     float deepFade = clamp(waterDepth / 18.0, 0.0, 1.0);
-                     diffuseColor.rgb = mix(shallowBed, diffuseColor.rgb * (0.75 + 0.35 * nMed), deepFade);
+                     float coralPatch = smoothstep(0.44, 0.68, mcFbm3(vMCWorldPos * 0.14));
+                     // Warm submerged sand transitioning to turquoise lagoon sand with depth
+                     vec3 wetShoreSand = drySand * vec3(0.52, 0.55, 0.50);
+                     vec3 lagoonSand   = vec3(0.12, 0.58, 0.56) * (0.9 + 0.2 * nFine);
+                     vec3 sandByDepth  = mix(wetShoreSand, lagoonSand, clamp(waterDepth / 3.5, 0.0, 1.0));
+                     vec3 coralCol     = mix(vec3(0.015, 0.08, 0.10), vec3(0.04, 0.14, 0.12), nMed);
+                     // Only show coral patches deeper than 1.2m so the immediate beach wading zone is pure sand
+                     float coralDepthMask = smoothstep(0.8, 2.8, waterDepth);
+                     vec3 shallowBed   = mix(sandByDepth, coralCol, coralPatch * 0.78 * coralDepthMask);
+                     float deepFade    = clamp(waterDepth / 18.0, 0.0, 1.0);
+                     diffuseColor.rgb  = mix(shallowBed, diffuseColor.rgb * (0.75 + 0.35 * nMed), deepFade);
                  } else if (wy < 126.2) {
                      // Coastal beach to jungle transition
-                     float grassBlend = smoothstep(123.8 + nMacro * 1.6, 126.0 + nMacro * 1.2, wy);
+                     float grassBlend = smoothstep(123.6 + nMacro * 1.6, 125.8 + nMacro * 1.2, wy);
                      vec3 coastalSurface = mix(sandCol, vegCol, grassBlend);
                      diffuseColor.rgb = mix(coastalSurface, rockCol, rockMask);
                  } else {
                      // Inland hills, mountains & biome-tinted terrain
-                     // Preserve special biome hues (snow/desert) while injecting rich procedural detail
-                     float isTropicalOrForest = smoothstep(0.15, 0.45, diffuseColor.g - diffuseColor.r * 0.65);
+                     float isTropicalOrForest = smoothstep(0.05, 0.25, diffuseColor.g - diffuseColor.r * 0.65);
                      vec3 detailedBase = mix(diffuseColor.rgb * (0.82 + 0.35 * nMed), vegCol, isTropicalOrForest * 0.85);
                      diffuseColor.rgb = mix(detailedBase, rockCol, rockMask);
                  }`
@@ -1839,13 +1842,16 @@ export class VoxelTerrain {
             hillHeight = Math.max(hillHeight, globalLand.hill);
         }
         
-        const yAbove = 32.0 + (baseHeightRaw + hillHeight) * smoothWeightAbove;
+        const h0 = Math.max(0.0, baseHeightRaw + hillHeight);
+        const yAbove = 32.0 + h0 * smoothWeightAbove;
         if (yAbove >= 40.0) {
             return yAbove;
         }
-        // Continuous shallow-to-deep bathymetry for smooth heightmap & turquoise lagoon rendering
-        const yBelow = (baseHeightRaw + hillHeight) * smoothWeightBelow * 5.0;
-        return Math.max(0.0, Math.min(39.95, yBelow));
+        // Exact closed-form zero-crossing of getBaseDensity(vx, y, vz) == 0 for 0 < y < 40:
+        // Matches y = 40.0 continuously at the exact shoreline with zero false shallow shelf!
+        const denom = 8.0 + h0 * Math.max(0.0, smoothWeightBelow - smoothWeightAbove);
+        const yExact = (40.0 * h0 * smoothWeightBelow) / denom;
+        return Math.max(0.0, Math.min(39.99, yExact));
     }
 }
 

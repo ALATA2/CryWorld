@@ -64,9 +64,9 @@ export class WaterSystem {
                 const vx = Math.round(wx / this.voxelScale);
                 const idx = tx + tz * this.maskRes;
 
-                // Se è oceano naturale all'esterno dell'isola, mask = 255
-                // Se è terraferma dell'isola, mask = 0
-                if (this.terrain.isNaturalOcean(vx, vz)) {
+                // Maschera (0) solo l'interno dell'isola ben sopra il livello del mare (> 122.5m),
+                // lasciando il bagnasciuga naturale libero da scalettature di 4m (gestito dallo Z-buffer 3D!)
+                if (this.terrain.getBaseDensity(vx, 40, vz) <= 0.85) {
                     this.maskData[idx] = 255;
                 } else {
                     this.maskData[idx] = 0;

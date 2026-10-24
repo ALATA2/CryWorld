@@ -439,97 +439,67 @@ function init() {
 
     water.material.fragmentShader = water.material.fragmentShader.replace(
         'gl_FragColor = vec4( outgoingLight, alpha );',
-        `// Check water mask over the island (discard global water plane over dry land)
+        `// Check water mask over interior dry land (prevents ocean plane inside unflooded inland pits)
          vec2 maskUV = (worldPosition.xz - waterMaskBounds.xy) / waterMaskBounds.zw;
+         float maskFade = 1.0;
          if (maskUV.x >= 0.0 && maskUV.x <= 1.0 && maskUV.y >= 0.0 && maskUV.y <= 1.0) {
              float maskVal = texture2D(waterMaskTexture, maskUV).r;
-             if (maskVal < 0.1) {
+             if (maskVal < 0.02) {
                  discard;
              }
+             maskFade = smoothstep(0.02, 0.30, maskVal);
          }
 
          float distAlpha = alpha;
          vec3 finalColor = outgoingLight;
 
          if (eye.y >= worldPosition.y) {
-             // 1. Compute Bathymetric Water Depth from Heightmap + Analytical Island Coastlines
-             vec2 vxvz = worldPosition.xz / 3.0;
-             float distCenter = length(vxvz);
-             float distAtoll = abs(distCenter - 38.0);
-             float wAtoll = max(0.0, 1.0 - distAtoll / 22.0);
-             if (distCenter < 38.0) wAtoll = max(0.45, wAtoll);
-
-             vec2 dVol = vec2(vxvz.x, (vxvz.y - 95.0) * (vxvz.y < 95.0 ? 0.5 : 1.0));
-             float wVol = max(0.0, 1.0 - length(dVol) / 42.0);
-
-             float dA = length((vxvz - vec2(250.0, 240.0)) * vec2(1.15, 0.85));
-             float dB = length((vxvz - vec2(220.0, 20.0)) * vec2(1.10, 0.95));
-             float dC = length((vxvz - vec2(260.0, -220.0)) * vec2(1.15, 0.70));
-             float wEast = max(max(max(0.0, 1.0 - dA / 128.0), max(0.0, 1.0 - dB / 108.0)), max(0.0, 1.0 - dC / 158.0));
-
-             float landProx = max(max(wAtoll, wVol), wEast);
-             float analyticDepth = clamp((1.0 - landProx) * 28.0, 0.0, 28.0);
-             // Inside lagoon center, keep a realistic 3.5m - 8.5m tropical lagoon depth
-             if (distCenter < 36.0) {
-                 analyticDepth = mix(2.2, 8.5, clamp((36.0 - distCenter) / 36.0, 0.0, 1.0));
+             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy across entire 2304m x 2304m archipelago)
+             float waterDepth = 25.5;
+             vec2 hmUV = (worldPosition.xz - vec2(-860.0, -1152.0)) / 2304.0;
+             if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
+                 float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
+                 float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
+                              * smoothstep(0.002, 0.04, hmUV.y) * smoothstep(0.998, 0.96, hmUV.y);
+                 waterDepth = mix(25.5, hmSample, hmEdge);
              }
 
-             float waterDepth = analyticDepth;
-             vec2 hmUV = (worldPosition.xz + 384.0) / 768.0;
-             if (hmUV.x >= 0.02 && hmUV.x <= 0.98 && hmUV.y >= 0.02 && hmUV.y <= 0.98) {
-                 float hmH = texture2D(heightmapTexture, hmUV).r * 192.0;
-                 float hmDepth = max(0.0, 120.0 - hmH);
-                 waterDepth = min(analyticDepth, hmDepth);
-             }
-
-             // 2. Tropical Bathymetry Palette: Electric Turquoise Shallows -> Aquamarine -> Deep Royal Sapphire
-             float shallowT = exp(-waterDepth * 0.24);
-             float midT     = exp(-waterDepth * 0.085);
-
-             // Mottled coral reef colonies visible in shallow turquoise water (matching Image 2)
-             float reefNoise = wFbm(worldPosition.xz * 0.045);
-             float reefFine  = wNoise2(worldPosition.xz * 0.22);
-             float coralMask = smoothstep(0.45, 0.66, reefNoise) * smoothstep(11.0, 1.2, waterDepth);
-
-             vec3 shallowSandCol = vec3(0.08, 0.92, 0.88) * (0.92 + 0.16 * reefFine); // Crystal electric turquoise over white sand
-             vec3 coralReefCol   = vec3(0.01, 0.26, 0.34) * (0.85 + 0.30 * reefFine); // Dark mottled coral reef patch
-             vec3 shallowLagoon  = mix(shallowSandCol, coralReefCol, coralMask * 0.78);
-
-             vec3 midLagoonCol   = vec3(0.00, 0.56, 0.78); // Rich tropical aquamarine
-             vec3 deepOceanCol   = vec3(0.01, 0.18, 0.40); // Deep royal sapphire blue
-
-             vec3 tropicWaterCol = mix(deepOceanCol, midLagoonCol, midT);
-             tropicWaterCol      = mix(tropicWaterCol, shallowLagoon, shallowT);
-
-             // 3. Fresnel Blend with Mirror Sky Reflection + Golden Sun Specular Path
-             vec3 viewDir = normalize(eye - worldPosition.xyz);
-             float NdotV = max(0.0, dot(surfaceNormal, viewDir));
-             float fresnel = clamp(pow(1.0 - NdotV, 3.2), 0.08, 0.78);
-
-             // Blend vibrant tropical water body with sky reflection
-             finalColor = mix(tropicWaterCol, outgoingLight * 1.08, fresnel * (0.35 + 0.65 * (1.0 - shallowT)));
-
-             // Warm Golden Sunlight Shimmer Path across the waves
+             // 2. Physical Optical Water Coloring (Preserves 100% of 3D Wave Ripples & Reflections — Zero Patina!)
              vec3 sunDirN = normalize(sunDirection);
+             vec3 viewDir = normalize(eye - worldPosition.xyz);
+             float waveRipple = 0.80 + 0.45 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
+
+             // Subtle turquoise optical scattering in shallow reef water (1m - 12m), rich marine cobalt in deep water
+             float shallowGlow = exp(-waterDepth * 0.22) * smoothstep(0.15, 2.2, waterDepth);
+             float midReefGlow = exp(-waterDepth * 0.09) * smoothstep(0.5, 3.5, waterDepth);
+
+             vec3 turquoiseScatter = vec3(0.0, 0.42, 0.46) * shallowGlow * waveRipple
+                                   + vec3(0.0, 0.16, 0.28) * midReefGlow * waveRipple;
+
+             // Keep outgoingLight's crisp wave normals & sky reflections intact, enriched with tropical turquoise depth
+             finalColor = outgoingLight * mix(vec3(0.82, 0.96, 1.02), vec3(0.75, 1.12, 1.15), shallowGlow) + turquoiseScatter;
+
+             // 3. Warm Golden Sunlight Shimmer Path across the waves
              vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             float sunGlintCore = pow(NdotH, 240.0) * 2.6;
-             float sunGlintPath = pow(NdotH, 32.0) * 0.38;
+             float sunGlintCore = pow(NdotH, 240.0) * 2.4;
+             float sunGlintPath = pow(NdotH, 36.0) * 0.30;
              finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
 
-             // 4. Crisp Frothy White Shoreline Breaking Surf & Foam
-             float wavePhase = sin(waterDepth * 3.8 - time * 6.5 + reefNoise * 4.0);
-             float foamNoise = wFbm(worldPosition.xz * 0.35 + vec2(time * 0.4, -time * 0.3));
-             float edgeFoam  = smoothstep(1.35, 0.05, waterDepth) * smoothstep(0.22, 0.58, foamNoise + (1.0 - waterDepth / 1.35) * 0.45);
-             float crestFoam = smoothstep(2.6, 0.3, waterDepth) * smoothstep(0.62, 0.92, wavePhase * 0.5 + 0.5) * smoothstep(0.38, 0.72, foamNoise) * 0.65;
-             float totalFoam = clamp(edgeFoam + crestFoam, 0.0, 1.0);
+             // 4. Delicate Lacy Shoreline Wave-Lap Foam (strictly 0.04m - 0.55m at the sand contact, zero milky sheet!)
+             float foamNoise = wFbm(worldPosition.xz * 0.65 + vec2(time * 0.5, -time * 0.35));
+             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 5.0 + foamNoise * 3.0);
+             float shoreLace = smoothstep(0.55, 0.06, waterDepth)
+                             * smoothstep(0.0, 0.05, waterDepth)
+                             * smoothstep(0.45, 0.80, foamNoise * 0.7 + lapWave * 0.45);
+             finalColor = mix(finalColor, vec3(0.95, 0.98, 1.0), shoreLace * 0.48);
 
-             vec3 foamColor = vec3(0.96, 0.99, 1.0);
-             finalColor = mix(finalColor, foamColor, totalFoam);
-
-             // Smooth shallow shoreline alpha blending so wet beach sand & coral reef show through crystal-clear at the edge, while deep ocean stays 98% opaque
-             distAlpha = mix(0.52, alpha, smoothstep(0.0, 5.5, waterDepth));
-             distAlpha = max(distAlpha, totalFoam * 0.96);
+             // 5. Beer-Lambert Crystal Transparency at the Beach -> Solid Opaque in Deep Ocean
+             // Starts at 0.0 right on the wet sand (zero edge/patina!), smoothly reveals 3D sand & coral reef in shallows,
+             // and reaches 0.98 opaque beyond ~9m depth so the deep ocean floor is never transparent!
+             float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
+             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
+             distAlpha = max(distAlpha, shoreLace * 0.55) * maskFade;
          }
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
@@ -575,8 +545,8 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
-    // Initialize heightmap data arrays and render dynamic shore foam heightmap texture
-    heightmapData = new Uint8Array(256 * 256);
+    // Initialize 512x512 high-precision bathymetry depth texture (2048m x 2048m)
+    heightmapData = new Uint8Array(512 * 512);
     updateHeightmap();
 
     const groundY = terrain.getSurfaceHeight(testPos, 192.0);
@@ -2184,63 +2154,76 @@ function spawnEnvironmentObjects(scene, terrain) {
     const rocksCount = 160;
     const bushesCount = 340;
     
-    // Procedural Coconut Palm Tree generator (curved trunks & lush arching fronds)
+    // Procedural Coconut Palm Tree generator (seamless curved trunk & lush arching fronds)
     function createPalmTree() {
         const treeGroup = new THREE.Group();
         
-        // Taller graceful trunk segments
-        const trunkSegmentsCount = 8 + Math.floor(Math.random() * 4);
-        let currentHeight = 0;
+        // Graceful 10-segment curved coconut trunk
+        const trunkSegmentsCount = 10;
         const trunkGroup = new THREE.Group();
         
-        // Warm weathered coconut palm bark material
+        // Warm weathered coconut palm bark material (exact hex matched by instanced extractor)
         const trunkMat = new THREE.MeshStandardMaterial({
             color: 0x9c8874,
             flatShading: false,
             roughness: 0.92
         });
         
-        // Accumulate rotation to make trunk bend/lean elegantly over the beach
-        let bendX = 0;
-        let bendZ = 0;
-        const bendDirectionX = (Math.random() - 0.5) * 0.24;
-        const bendDirectionZ = (Math.random() - 0.5) * 0.24;
+        // Chained kinematic trunk curve: leans out gracefully and curves upward toward the sun
+        const upAxis = new THREE.Vector3(0, 1, 0);
+        const segDir = new THREE.Vector3();
+        const leanAngle = 0.65;
+        const maxLean = 0.36; // ~20.5 deg natural tropical lean
+        let curX = 0;
+        let curY = 0;
+        let curZ = 0;
         
         for (let i = 0; i < trunkSegmentsCount; i++) {
-            const h = 1.1;
-            let rBottom = 0.32 * (1.0 - i / (trunkSegmentsCount + 3));
-            let rTop = 0.32 * (1.0 - (i + 1) / (trunkSegmentsCount + 3));
+            const h = 1.12;
+            const step = 0.96; // 16cm overlap guarantees 100% seamless continuous bark joints
+            const t = i / (trunkSegmentsCount - 1);
+            let rBottom = 0.33 * (1.0 - i / (trunkSegmentsCount + 3.5));
+            let rTop = 0.33 * (1.0 - (i + 1) / (trunkSegmentsCount + 3.5));
             
             if (i === 0) {
-                rBottom = rBottom * 1.95;
+                rBottom = rBottom * 1.65; // Natural flared root base
             }
             
-            const segmentGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 7);
+            // Smooth natural bow curve (strongest lean in mid-lower trunk, recovering slightly near crown)
+            const segTilt = maxLean * Math.sin((0.18 + t * 0.72) * Math.PI * 0.88);
+            segDir.set(
+                Math.cos(leanAngle) * Math.sin(segTilt),
+                Math.cos(segTilt),
+                Math.sin(leanAngle) * Math.sin(segTilt)
+            ).normalize();
+            
+            const segmentGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 8);
             const segment = new THREE.Mesh(segmentGeo, trunkMat);
             segment.castShadow = true;
             segment.receiveShadow = true;
             
-            segment.position.y = currentHeight + h / 2;
+            segment.quaternion.setFromUnitVectors(upAxis, segDir);
+            segment.position.set(
+                curX + segDir.x * (h * 0.5 - 0.08),
+                curY + segDir.y * (h * 0.5 - 0.08),
+                curZ + segDir.z * (h * 0.5 - 0.08)
+            );
             
-            bendX += bendDirectionX;
-            bendZ += bendDirectionZ;
-            segment.rotation.set(bendX, 0, bendZ);
-            
-            segment.position.x += Math.sin(bendX) * 0.2;
-            segment.position.z += Math.sin(bendZ) * 0.2;
-            
-            const ringGeo = new THREE.CylinderGeometry(rBottom * 1.10, rBottom * 1.10, 0.12, 7);
+            const ringGeo = new THREE.CylinderGeometry(rBottom * 1.07, rBottom * 1.05, 0.10, 8);
             const ring = new THREE.Mesh(ringGeo, trunkMat);
-            ring.position.y = -h / 2;
+            ring.position.y = -h * 0.32;
             segment.add(ring);
             
             trunkGroup.add(segment);
-            currentHeight += h * 0.88;
+            
+            curX += segDir.x * step;
+            curY += segDir.y * step;
+            curZ += segDir.z * step;
         }
         treeGroup.add(trunkGroup);
         
-        // Leaves at the crown (11-13 drooping arching feathered palm fronds)
-        const leavesCount = 11 + Math.floor(Math.random() * 3);
+        // Leaves at the crown (12 drooping arching feathered palm fronds)
+        const leavesCount = 12;
         const leafMat = new THREE.MeshStandardMaterial({
             color: 0x2e8b3c, // Rich natural tropical palm green
             flatShading: false,
@@ -2249,17 +2232,21 @@ function spawnEnvironmentObjects(scene, terrain) {
         });
         
         const leavesGroup = new THREE.Group();
-        const topSegment = trunkGroup.children[trunkSegmentsCount - 1];
-        leavesGroup.position.set(topSegment.position.x, currentHeight - 0.2, topSegment.position.z);
-        leavesGroup.rotation.copy(topSegment.rotation);
+        const crownDir = new THREE.Vector3(
+            Math.cos(leanAngle) * Math.sin(maxLean * 0.45),
+            Math.cos(maxLean * 0.45),
+            Math.sin(leanAngle) * Math.sin(maxLean * 0.45)
+        ).normalize();
+        leavesGroup.position.set(curX, curY - 0.06, curZ);
+        leavesGroup.quaternion.setFromUnitVectors(upAxis, crownDir);
         
         for (let i = 0; i < leavesCount; i++) {
             const leaf = new THREE.Group();
             const angle = i * (Math.PI * 2 / leavesCount);
             leaf.rotation.y = angle;
             
-            let curY = 0;
-            let curZ = 0;
+            let fCurY = 0;
+            let fCurZ = 0;
             let rotX = (i % 2 === 0) ? 0.08 : 0.22; // Layered upper and lower frond tiers
             const stemSegments = 5;
             const stemL = 0.84;
@@ -2271,7 +2258,7 @@ function spawnEnvironmentObjects(scene, terrain) {
                 const stemPart = new THREE.Mesh(stemPartGeo, leafMat);
                 stemPart.castShadow = true;
                 
-                stemPart.position.set(0, curY, curZ + stemL / 2);
+                stemPart.position.set(0, fCurY, fCurZ + stemL / 2);
                 stemPart.rotation.x = -rotX;
                 leaf.add(stemPart);
                 
@@ -2287,19 +2274,19 @@ function spawnEnvironmentObjects(scene, terrain) {
                     
                     const leafletL = new THREE.Mesh(leafletGeo, leafMat);
                     leafletL.castShadow = true;
-                    leafletL.position.set(-leafletLength / 2 * 0.85, curY, curZ + zOffset);
+                    leafletL.position.set(-leafletLength / 2 * 0.85, fCurY, fCurZ + zOffset);
                     leafletL.rotation.set(-rotX + 0.1, 0.45, -0.22);
                     leaf.add(leafletL);
                     
                     const leafletR = new THREE.Mesh(leafletGeo, leafMat);
                     leafletR.castShadow = true;
-                    leafletR.position.set(leafletLength / 2 * 0.85, curY, curZ + zOffset);
+                    leafletR.position.set(leafletLength / 2 * 0.85, fCurY, fCurZ + zOffset);
                     leafletR.rotation.set(-rotX + 0.1, -0.45, 0.22);
                     leaf.add(leafletR);
                 }
                 
-                curZ += stemL * Math.cos(rotX) * 0.95;
-                curY -= stemL * Math.sin(rotX) * 0.95;
+                fCurZ += stemL * Math.cos(rotX) * 0.95;
+                fCurY -= stemL * Math.sin(rotX) * 0.95;
                 rotX += 0.18;
             }
             
@@ -2307,7 +2294,7 @@ function spawnEnvironmentObjects(scene, terrain) {
         }
         treeGroup.add(leavesGroup);
         
-        // Cluster of 3 coconuts at the center of the palm crown
+        // Cluster of 3 coconuts tucked seamlessly beneath the palm crown
         const coconutMat = new THREE.MeshStandardMaterial({
             color: 0x5a3d28,
             flatShading: false,
@@ -2320,11 +2307,10 @@ function spawnEnvironmentObjects(scene, terrain) {
             coconut.castShadow = true;
             const cAngle = c * (Math.PI * 2 / 3);
             coconut.position.set(
-                topSegment.position.x + Math.cos(cAngle) * 0.28,
-                currentHeight - 0.45,
-                topSegment.position.z + Math.sin(cAngle) * 0.28
+                curX + Math.cos(cAngle) * 0.26,
+                curY - 0.30,
+                curZ + Math.sin(cAngle) * 0.26
             );
-            coconut.rotation.copy(topSegment.rotation);
             treeGroup.add(coconut);
         }
         
@@ -2783,53 +2769,65 @@ function spawnEnvironmentObjects(scene, terrain) {
 
 function updateHeightmap(nearPos, radius) {
     if (!terrain) return;
-    const width = 256;
-    const height = 64;
-    const depth = 256;
+    const width = 512;
+    const depth = 512;
+    const minWorldX = -860.0;
+    const minWorldZ = -1152.0;
+    const texelSize = 4.5; // 512 * 4.5m = 2304m x 2304m covering the entire archipelago
     const scale = 3.0; // voxelScale
 
     let minX = 0, maxX = width - 1;
     let minZ = 0, maxZ = depth - 1;
 
-    // Fast path: if modifying locally, only update the small touched window (10x10 instead of 65,536 iterations!)
+    // Fast path: when digging/building locally, only update the small touched window
     if (nearPos && radius) {
-        const rVox = Math.ceil((radius + 6.0) / scale);
-        const cvx = Math.round(nearPos.x / scale);
-        const cvz = Math.round(nearPos.z / scale);
-        minX = Math.max(0, cvx - rVox + 128);
-        maxX = Math.min(width - 1, cvx + rVox + 128);
-        minZ = Math.max(0, cvz - rVox + 128);
-        maxZ = Math.min(depth - 1, cvz + rVox + 128);
+        const padTex = Math.ceil((radius + 9.0) / texelSize);
+        const cx = Math.floor((nearPos.x - minWorldX) / texelSize);
+        const cz = Math.floor((nearPos.z - minWorldZ) / texelSize);
+        minX = Math.max(0, cx - padTex);
+        maxX = Math.min(width - 1, cx + padTex);
+        minZ = Math.max(0, cz - padTex);
+        maxZ = Math.min(depth - 1, cz + padTex);
     }
-    
+
     for (let x = minX; x <= maxX; x++) {
+        const wx = minWorldX + (x + 0.5) * texelSize;
+        const vx = wx / scale;
+        const ivx = Math.round(vx);
+
         for (let z = minZ; z <= maxZ; z++) {
-            // Map x [0, 255] to vx [-128, 127] centered at world (0,0)
-            const vx = x - 128;
-            const vz = z - 128;
-            let surfaceY = 0;
-            
-            const colKey = `${vx},${vz}`;
-            if (terrain.modifiedColumns.has(colKey)) {
-                // Column has been modified, perform accurate vertical scan
-                for (let y = height - 1; y >= 0; y--) {
-                    if (terrain.getDensity(vx, y, vz) >= 0.0) { // solid voxel threshold
-                        surfaceY = y;
+            const wz = minWorldZ + (z + 0.5) * texelSize;
+            const vz = wz / scale;
+            const ivz = Math.round(vz);
+            let surfaceY = 0.0;
+
+            if (terrain.modifiedColumns.has(`${ivx},${ivz}`)) {
+                // Column was sculpted/dug: scan vertically with smooth sub-voxel zero-crossing interpolation
+                for (let y = 44; y >= 0; y--) {
+                    const d0 = terrain.getDensity(ivx, y, ivz);
+                    if (d0 >= 0.0) {
+                        if (y < 44) {
+                            const d1 = terrain.getDensity(ivx, y + 1, ivz);
+                            const denom = d0 - d1;
+                            surfaceY = denom > 1e-5 ? (y + d0 / denom) : y;
+                        } else {
+                            surfaceY = y;
+                        }
                         break;
                     }
                 }
             } else {
-                // Instantly estimate surface height mathematically (no noise loops)
+                // Exact closed-form analytical terrain height (10cm precision, zero shelf clamping)
                 surfaceY = terrain.getEstimatedSurfaceHeight(vx, vz);
             }
-            
-            // Convert local voxel Y coordinate to world height (meters)
+
+            // Encode water depth [0.0m .. 25.5m] below sea level (120.0m) at 0.1m resolution
             const h = surfaceY * scale;
-            const norm = Math.max(0.0, Math.min(192.0, h)) / 192.0;
-            heightmapData[x + z * width] = Math.floor(norm * 255);
+            const waterDepthMeters = Math.max(0.0, Math.min(25.5, 120.0 - h));
+            heightmapData[x + z * width] = Math.round((waterDepthMeters / 25.5) * 255.0);
         }
     }
-    
+
     if (!heightmapTexture) {
         heightmapTexture = new THREE.DataTexture(
             heightmapData,
@@ -2841,7 +2839,7 @@ function updateHeightmap(nearPos, radius) {
         heightmapTexture.minFilter = THREE.LinearFilter;
         heightmapTexture.magFilter = THREE.LinearFilter;
         heightmapTexture.needsUpdate = true;
-        
+
         if (water && water.material && water.material.uniforms) {
             water.material.uniforms['heightmapTexture'] = { value: heightmapTexture };
         }

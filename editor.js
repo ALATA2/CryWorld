@@ -8,6 +8,7 @@ import { VoxelTerrain } from "./marching_cubes.js";
 // ==========================================
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun;
+let heightmapData = null, heightmapTexture = null;
 let raycaster;
 let brushRing, brushDisc;
 let brushTargetPos = new THREE.Vector3();
@@ -278,6 +279,7 @@ function init() {
     // Inject planetary curvature & bathymetric reef/foam shader into water
     const cameraPosUniform = { value: new THREE.Vector3() };
     water.material.uniforms["cameraPos"] = cameraPosUniform;
+    water.material.uniforms["heightmapTexture"] = { value: null };
     water.material.vertexShader = `
         uniform vec3 cameraPos;
     ` + water.material.vertexShader;
@@ -302,6 +304,7 @@ function init() {
 
     water.material.fragmentShader = `
         uniform vec3 cameraPos;
+        uniform sampler2D heightmapTexture;
         float wHash21(vec2 p) {
             p = fract(p * vec2(127.1, 311.7));
             p += dot(p, p + 34.5);
@@ -332,46 +335,45 @@ function init() {
         `float distAlpha = alpha;
          vec3 finalColor = outgoingLight;
          if (eye.y >= worldPosition.y) {
-             vec2 vxvz = worldPosition.xz / 3.0;
-             float distCenter = length(vxvz);
-             float distAtoll = abs(distCenter - 38.0);
-             float wAtoll = max(0.0, 1.0 - distAtoll / 22.0);
-             if (distCenter < 38.0) wAtoll = max(0.45, wAtoll);
-             vec2 dVol = vec2(vxvz.x, (vxvz.y - 95.0) * (vxvz.y < 95.0 ? 0.5 : 1.0));
-             float wVol = max(0.0, 1.0 - length(dVol) / 42.0);
-             float dA = length((vxvz - vec2(250.0, 240.0)) * vec2(1.15, 0.85));
-             float dB = length((vxvz - vec2(220.0, 20.0)) * vec2(1.10, 0.95));
-             float dC = length((vxvz - vec2(260.0, -220.0)) * vec2(1.15, 0.70));
-             float wEast = max(max(max(0.0, 1.0 - dA / 128.0), max(0.0, 1.0 - dB / 108.0)), max(0.0, 1.0 - dC / 158.0));
-             float landProx = max(max(wAtoll, wVol), wEast);
-             float waterDepth = clamp((1.0 - landProx) * 28.0, 0.0, 28.0);
-             if (distCenter < 36.0) {
-                 waterDepth = mix(2.2, 8.5, clamp((36.0 - distCenter) / 36.0, 0.0, 1.0));
+             float waterDepth = 25.5;
+             vec2 hmUV = (worldPosition.xz - vec2(-860.0, -1152.0)) / 2304.0;
+             if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
+                 float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
+                 float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
+                              * smoothstep(0.002, 0.04, hmUV.y) * smoothstep(0.998, 0.96, hmUV.y);
+                 waterDepth = mix(25.5, hmSample, hmEdge);
              }
-             float shallowT = exp(-waterDepth * 0.24);
-             float midT     = exp(-waterDepth * 0.085);
-             float reefNoise = wFbm(worldPosition.xz * 0.045);
-             float reefFine  = wNoise2(worldPosition.xz * 0.22);
-             float coralMask = smoothstep(0.45, 0.66, reefNoise) * smoothstep(11.0, 1.2, waterDepth);
-             vec3 shallowSandCol = vec3(0.08, 0.92, 0.88) * (0.92 + 0.16 * reefFine);
-             vec3 coralReefCol   = vec3(0.01, 0.26, 0.34) * (0.85 + 0.30 * reefFine);
-             vec3 shallowLagoon  = mix(shallowSandCol, coralReefCol, coralMask * 0.78);
-             vec3 tropicWaterCol = mix(mix(vec3(0.01, 0.18, 0.40), vec3(0.00, 0.56, 0.78), midT), shallowLagoon, shallowT);
+
+             vec3 sunDirN = normalize(sunDirection);
              vec3 viewDir = normalize(eye - worldPosition.xyz);
-             float fresnel = clamp(pow(1.0 - max(0.0, dot(surfaceNormal, viewDir)), 3.2), 0.08, 0.78);
-             finalColor = mix(tropicWaterCol, outgoingLight * 1.08, fresnel * (0.35 + 0.65 * (1.0 - shallowT)));
-             vec3 halfVec = normalize(normalize(sunDirection) + viewDir);
+             float waveRipple = 0.80 + 0.45 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
+
+             float shallowGlow = exp(-waterDepth * 0.22) * smoothstep(0.15, 2.2, waterDepth);
+             float midReefGlow = exp(-waterDepth * 0.09) * smoothstep(0.5, 3.5, waterDepth);
+             vec3 turquoiseScatter = vec3(0.0, 0.42, 0.46) * shallowGlow * waveRipple
+                                   + vec3(0.0, 0.16, 0.28) * midReefGlow * waveRipple;
+
+             finalColor = outgoingLight * mix(vec3(0.82, 0.96, 1.02), vec3(0.75, 1.12, 1.15), shallowGlow) + turquoiseScatter;
+
+             vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.6 + pow(NdotH, 32.0) * 0.38);
-             float wavePhase = sin(waterDepth * 3.8 - time * 6.5 + reefNoise * 4.0);
-             float foamNoise = wFbm(worldPosition.xz * 0.35 + vec2(time * 0.4, -time * 0.3));
-             float edgeFoam  = smoothstep(1.35, 0.05, waterDepth) * smoothstep(0.22, 0.58, foamNoise + (1.0 - waterDepth / 1.35) * 0.45);
-             float crestFoam = smoothstep(2.6, 0.3, waterDepth) * smoothstep(0.62, 0.92, wavePhase * 0.5 + 0.5) * smoothstep(0.38, 0.72, foamNoise) * 0.65;
-             float totalFoam = clamp(edgeFoam + crestFoam, 0.0, 1.0);
-             finalColor = mix(finalColor, vec3(0.96, 0.99, 1.0), totalFoam);
-             distAlpha = max(mix(0.52, alpha, smoothstep(0.0, 5.5, waterDepth)), totalFoam * 0.96);
+             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.4 + pow(NdotH, 36.0) * 0.30);
+
+             float foamNoise = wFbm(worldPosition.xz * 0.65 + vec2(time * 0.5, -time * 0.35));
+             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 5.0 + foamNoise * 3.0);
+             float shoreLace = smoothstep(0.55, 0.06, waterDepth)
+                             * smoothstep(0.0, 0.05, waterDepth)
+                             * smoothstep(0.45, 0.80, foamNoise * 0.7 + lapWave * 0.45);
+             finalColor = mix(finalColor, vec3(0.95, 0.98, 1.0), shoreLace * 0.48);
+
+             float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
+             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
+             distAlpha = max(distAlpha, shoreLace * 0.55);
          }
          float distH = length(worldPosition.xz - cameraPos.xz);
+         if (eye.y >= worldPosition.y) {
+             finalColor += vec3(0.20, 0.70, 1.0) * smoothstep(1600.0, 2750.0, distH) * 1.5;
+         }
          float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
          gl_FragColor = vec4( finalColor, distAlpha * horizonAlpha );`
     );
@@ -393,6 +395,9 @@ function init() {
     } catch (e) {
         console.warn("Could not load custom map:", e);
     }
+
+    heightmapData = new Uint8Array(512 * 512);
+    updateHeightmap();
 
     // Foliage Group
     foliageGroup = new THREE.Group();
@@ -802,8 +807,89 @@ function applyActiveTool(actionType = "primary") {
         toggleCameraMode();
     }
 
+    if (currentTool !== "foliage" && currentTool !== "view") {
+        updateHeightmap(hit, currentTool === "stamp" ? 190.0 : brushRadius);
+    }
+
     updateModCount();
     saveToLocalStorage();
+}
+
+function updateHeightmap(nearPos, radius) {
+    if (!terrain || !heightmapData) return;
+    const width = 512;
+    const depth = 512;
+    const minWorldX = -860.0;
+    const minWorldZ = -1152.0;
+    const texelSize = 4.5;
+    const scale = 3.0;
+
+    let minX = 0, maxX = width - 1;
+    let minZ = 0, maxZ = depth - 1;
+
+    if (nearPos && radius) {
+        const padTex = Math.ceil((radius + 9.0) / texelSize);
+        const cx = Math.floor((nearPos.x - minWorldX) / texelSize);
+        const cz = Math.floor((nearPos.z - minWorldZ) / texelSize);
+        minX = Math.max(0, cx - padTex);
+        maxX = Math.min(width - 1, cx + padTex);
+        minZ = Math.max(0, cz - padTex);
+        maxZ = Math.min(depth - 1, cz + padTex);
+    }
+
+    for (let x = minX; x <= maxX; x++) {
+        const wx = minWorldX + (x + 0.5) * texelSize;
+        const vx = wx / scale;
+        const ivx = Math.round(vx);
+
+        for (let z = minZ; z <= maxZ; z++) {
+            const wz = minWorldZ + (z + 0.5) * texelSize;
+            const vz = wz / scale;
+            const ivz = Math.round(vz);
+            let surfaceY = 0.0;
+
+            if (terrain.modifiedColumns.has(`${ivx},${ivz}`)) {
+                for (let y = 44; y >= 0; y--) {
+                    const d0 = terrain.getDensity(ivx, y, ivz);
+                    if (d0 >= 0.0) {
+                        if (y < 44) {
+                            const d1 = terrain.getDensity(ivx, y + 1, ivz);
+                            const denom = d0 - d1;
+                            surfaceY = denom > 1e-5 ? (y + d0 / denom) : y;
+                        } else {
+                            surfaceY = y;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                surfaceY = terrain.getEstimatedSurfaceHeight(vx, vz);
+            }
+
+            const h = surfaceY * scale;
+            const waterDepthMeters = Math.max(0.0, Math.min(25.5, 120.0 - h));
+            heightmapData[x + z * width] = Math.round((waterDepthMeters / 25.5) * 255.0);
+        }
+    }
+
+    if (!heightmapTexture) {
+        heightmapTexture = new THREE.DataTexture(
+            heightmapData,
+            width,
+            depth,
+            THREE.RedFormat,
+            THREE.UnsignedByteType
+        );
+        heightmapTexture.minFilter = THREE.LinearFilter;
+        heightmapTexture.magFilter = THREE.LinearFilter;
+        heightmapTexture.needsUpdate = true;
+
+        if (water && water.material && water.material.uniforms) {
+            water.material.uniforms["heightmapTexture"] = { value: heightmapTexture };
+        }
+    } else {
+        heightmapTexture.needsUpdate = true;
+    }
 }
 
 function flattenTerrain(center, radius, targetY) {
@@ -1110,6 +1196,7 @@ function importMap(e) {
             const data = JSON.parse(event.target.result);
             if (data.voxels) {
                 terrain.importMapData(data.voxels);
+                updateHeightmap();
                 saveToLocalStorage();
             }
             if (data.foliage && Array.isArray(data.foliage)) {
