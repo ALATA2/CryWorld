@@ -73,12 +73,16 @@ let fpsFrames = 0;
 // Instanced mesh variables for environment objects
 let instancedPalmsTrunk, instancedPalmsLeaves, instancedPalmsCoconuts;
 let instancedPinesTrunk, instancedPinesFoliage;
-let instancedRocks;
+let instancedPinesBTrunk, instancedPinesBFoliage;
+let instancedRocks, instancedBushes;
+let atlantisMistGroup = null;
+let atlantisMistUniforms = null;
 
 // Arrays containing positions and falling states of all environment objects
 let palmInstances = [];
 let pineInstances = [];
 let rockInstances = [];
+let bushInstances = [];
 
 // Head bobbing & FOV speed effects variables
 let bobTime = 0;
@@ -98,7 +102,7 @@ function init() {
     // 1. Scene & Camera Setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff); // Caribbean cyan horizon background
-    scene.fog = new THREE.Fog(0x8ce3ff, 250, 600); // Linear fog to mask chunk rendering boundary
+    scene.fog = new THREE.Fog(0x8ce3ff, 460, 1060); // Clear panoramic view across all 3 concentric rings up to the Ring of Mist
 
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 45000);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
@@ -454,9 +458,9 @@ function init() {
          vec3 finalColor = outgoingLight;
 
          if (eye.y >= worldPosition.y) {
-             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy across entire 2304m x 2304m archipelago)
+             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy symmetrically centered on Atlantis)
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-860.0, -1152.0)) / 2304.0;
+             vec2 hmUV = (worldPosition.xz - vec2(-1152.0, -1152.0)) / 2304.0;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -495,11 +499,19 @@ function init() {
              finalColor = mix(finalColor, vec3(0.95, 0.98, 1.0), shoreLace * 0.48);
 
              // 5. Beer-Lambert Crystal Transparency at the Beach -> Solid Opaque in Deep Ocean
-             // Starts at 0.0 right on the wet sand (zero edge/patina!), smoothly reveals 3D sand & coral reef in shallows,
-             // and reaches 0.98 opaque beyond ~9m depth so the deep ocean floor is never transparent!
              float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
              distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
              distAlpha = max(distAlpha, shoreLace * 0.55) * maskFade;
+
+             // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
+             float rAtlantisW = length(worldPosition.xz);
+             float seaMistBand = smoothstep(615.0, 685.0, rAtlantisW) * (1.0 - smoothstep(785.0, 860.0, rAtlantisW));
+             if (seaMistBand > 0.001) {
+                 float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
+                 float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
+                 finalColor = mix(finalColor, vec3(0.84, 0.94, 0.99), mistAmt * 0.88);
+                 distAlpha = max(distAlpha, mistAmt * 0.95);
+             }
          }
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
@@ -518,20 +530,26 @@ function init() {
     
     scene.add(water);
 
-    // 6. Marching Cubes Voxel Terrain Setup
-    terrain = new VoxelTerrain(scene, 256, 64, 256, 3.0);
+    // 6. Marching Cubes Voxel Terrain Setup (Height 88 voxels = 264m for Sacred Mountain & Alpine Peaks)
+    terrain = new VoxelTerrain(scene, 256, 88, 256, 3.0);
+
+    // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis
+    createAtlantisMistRing(scene);
 
     // 6b. Dynamic Canal Water & Flow System
     waterSystem = new WaterSystem(scene, terrain, camera, waterNormalsTexture);
     water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
     water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
-    const startX = 0;
-    const startZ = 280; // Grassy plateau of the volcano island (altitude ~125.2m, dry land)
-    const testPos = new THREE.Vector3(startX, 130, startZ);
+    // Panoramic Spawn on the Central Island Terrace:
+    // Facing -Z shows Il Monte Sacro rising on the left, the Inner Harbor & Grand Canal straight ahead,
+    // all 3 Concentric Water & Land Rings, and the encircling Ring of Mist on the horizon!
+    const startX = 46;
+    const startZ = 72;
+    const testPos = new THREE.Vector3(startX, 220, startZ);
 
     // Build initial chunks around start position so we can query height
-    terrain.updateChunksAroundPlayer(testPos, 1000);
+    terrain.updateChunksAroundPlayer(testPos, 1050);
 
     // Auto-load custom map from Level Editor if saved in localStorage
     try {
@@ -545,11 +563,11 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
-    // Initialize 512x512 high-precision bathymetry depth texture (2048m x 2048m)
+    // Initialize 512x512 high-precision bathymetry depth texture (2304m x 2304m centered on Atlantis)
     heightmapData = new Uint8Array(512 * 512);
     updateHeightmap();
 
-    const groundY = terrain.getSurfaceHeight(testPos, 192.0);
+    const groundY = terrain.getSurfaceHeight(testPos, 250.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
 
     // 7. Player Controls (First Person) Setup
@@ -1953,8 +1971,9 @@ function animate() {
     const currentFogColor = baseAtmosphere.clone().lerp(spaceColor, altFactor);
  
     if (isLookingFromBelow) {
-        // Completely hide the sky dome and clouds while underwater so no daylight sky/horizon leaks through
+        // Completely hide the sky dome, mist ring and clouds while underwater so no daylight sky/horizon leaks through
         if (sky) sky.visible = false;
+        if (atlantisMistGroup) atlantisMistGroup.visible = false;
         if (clouds) {
             for (let i = 0; i < clouds.length; i++) clouds[i].visible = false;
         }
@@ -1986,8 +2005,9 @@ function animate() {
             water.material.uniforms['alpha'].value = 0.70;
         }
     } else {
-        // Restore sky dome and clouds above water
+        // Restore sky dome, mist ring and clouds above water
         if (sky) sky.visible = true;
+        if (atlantisMistGroup) atlantisMistGroup.visible = true;
         if (clouds) {
             for (let i = 0; i < clouds.length; i++) clouds[i].visible = true;
         }
@@ -1995,20 +2015,38 @@ function animate() {
         if (underwaterOverlay) {
             underwaterOverlay.classList.add('hidden');
         }
-        
-        scene.fog.color.copy(currentFogColor);
-        scene.background.copy(currentFogColor);
 
-        // From 1.1km up, the atmosphere thins completely (fog recedes to 45km for crystal-clear view of islands and ocean)
-        scene.fog.near = 250.0 + (10000.0 - 250.0) * altFactor;
-        scene.fog.far = 600.0 + (45000.0 - 600.0) * altFactor;
-        
+        // Immersive walk/sail/fly-through fog when crossing the circular Boundary Mist of Plato's Atlantis (r = 620m .. 860m)
+        const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
+        let mistImmerse = 0.0;
+        if (camDistCenter > 615.0 && camDistCenter < 865.0 && camera.position.y < 290.0) {
+            const rBand = Math.sin(((camDistCenter - 615.0) / 250.0) * Math.PI);
+            const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 210.0) / 80.0));
+            mistImmerse = Math.max(0.0, rBand * hBand);
+        }
+
+        const mistFogColor = new THREE.Color(0xdcf0fa);
+        const finalFogCol = currentFogColor.clone().lerp(mistFogColor, mistImmerse * 0.90);
+        scene.fog.color.copy(finalFogCol);
+        scene.background.copy(finalFogCol);
+
+        // Clear panoramic view across all 3 concentric rings (460m .. 1060m), thickening smoothly inside the Mist Veil!
+        const baseNear = 460.0 + (10000.0 - 460.0) * altFactor;
+        const baseFar  = 1060.0 + (45000.0 - 1060.0) * altFactor;
+        scene.fog.near = THREE.MathUtils.lerp(baseNear, 16.0, mistImmerse);
+        scene.fog.far  = THREE.MathUtils.lerp(baseFar, 155.0, mistImmerse);
+
         renderer.toneMappingExposure = 1.15;
 
         // Outside water: fully opaque water (alpha = 0.98) so submerged terrain is not visible from above
         if (water && water.material && water.material.uniforms['alpha']) {
             water.material.uniforms['alpha'].value = 0.98;
         }
+    }
+
+    if (atlantisMistUniforms) {
+        atlantisMistUniforms.uTime.value += delta;
+        atlantisMistUniforms.uCameraPos.value.copy(camera.position);
     }
 
     // Keep ocean centered on player horizontally and update planetary curvature center
@@ -2146,13 +2184,128 @@ function animate() {
 }
 
 // ==========================================
+// VOLUMETRIC 360° BOUNDARY MIST RING AROUND PLATO'S ATLANTIS
+// ==========================================
+function createAtlantisMistRing(scene) {
+    atlantisMistGroup = new THREE.Group();
+    atlantisMistUniforms = {
+        uTime: { value: 0.0 },
+        uCameraPos: { value: new THREE.Vector3() }
+    };
+
+    const mistShaderMat = new THREE.ShaderMaterial({
+        uniforms: atlantisMistUniforms,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        vertexShader: `
+            uniform vec3 uCameraPos;
+            varying vec3 vWorldPos;
+            varying vec3 vWorldNormal;
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vWorldPos = wp.xyz;
+                vWorldNormal = normalize(mat3(modelMatrix) * normal);
+
+                float distH = length(wp.xz - uCameraPos.xz);
+                float planetR = 1800000.0;
+                if (distH < planetR) {
+                    wp.y -= (planetR - sqrt(planetR * planetR - distH * distH));
+                }
+                gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+        `,
+        fragmentShader: `
+            uniform float uTime;
+            uniform vec3 uCameraPos;
+            varying vec3 vWorldPos;
+            varying vec3 vWorldNormal;
+            varying vec2 vUv;
+
+            float mHash(vec2 p) {
+                p = fract(p * vec2(127.1, 311.7));
+                p += dot(p, p + 34.5);
+                return fract(p.x * p.y);
+            }
+            float mNoise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(
+                    mix(mHash(i), mHash(i + vec2(1.0, 0.0)), f.x),
+                    mix(mHash(i + vec2(0.0, 1.0)), mHash(i + vec2(1.0, 1.0)), f.x),
+                    f.y
+                );
+            }
+            float mFbm(vec2 p) {
+                float v = 0.0;
+                v += 0.50 * mNoise(p); p *= 2.03;
+                v += 0.25 * mNoise(p); p *= 2.02;
+                v += 0.125 * mNoise(p); p *= 2.04;
+                v += 0.0625 * mNoise(p);
+                return v;
+            }
+
+            void main() {
+                float theta = atan(vWorldPos.z, vWorldPos.x);
+                float hRel = vWorldPos.y - 120.0;
+                if (hRel < -2.0) discard;
+
+                // Animated billowing cloud plumes drifting around the perimeter of the 3rd Ring
+                vec2 cloudCoord = vec2(theta * 14.0 + uTime * 0.055, hRel * 0.022 - uTime * 0.03);
+                float billow = mFbm(cloudCoord);
+                float fineWisp = mFbm(cloudCoord * 2.7 - vec2(uTime * 0.08, 0.0));
+
+                float dynamicTop = 85.0 + billow * 72.0 + fineWisp * 24.0;
+                float bottomFade = smoothstep(-1.0, 12.0, hRel);
+                float topFade = 1.0 - smoothstep(dynamicTop * 0.52, dynamicTop, hRel);
+
+                // Dissolve individual shells close to camera while scene.fog seamlessly immerses the player
+                float camDist = length(vWorldPos - uCameraPos);
+                float nearDissolve = smoothstep(10.0, 52.0, camDist);
+                float farFade = 1.0 - smoothstep(1900.0, 2750.0, camDist);
+
+                vec3 viewDir = normalize(uCameraPos - vWorldPos);
+                float facing = 0.35 + 0.65 * abs(dot(normalize(vWorldNormal), viewDir));
+
+                float density = bottomFade * topFade * (0.42 + 0.58 * billow) * facing * nearDissolve * farFade;
+                if (density < 0.008) discard;
+
+                // Pearlescent sunlit mist top -> aquamarine sea-fog base
+                vec3 baseMistCol = vec3(0.74, 0.89, 0.97);
+                vec3 sunTopCol   = vec3(0.95, 0.98, 1.00);
+                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 95.0 + billow * 0.25, 0.0, 1.0));
+
+                gl_FragColor = vec4(col, clamp(density * 0.46, 0.0, 0.78));
+            }
+        `
+    });
+
+    // 4 nested concentric billowing mist curtains spanning r = 655m .. 805m around the 3rd Land Ring
+    const shellRadii = [655, 700, 750, 805];
+    const shellHeight = 165;
+    for (let i = 0; i < shellRadii.length; i++) {
+        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 96, 8, true);
+        const cylMesh = new THREE.Mesh(cylGeo, mistShaderMat);
+        cylMesh.position.set(0, 118.0 + shellHeight * 0.5, 0);
+        cylMesh.rotation.y = i * 0.65;
+        cylMesh.frustumCulled = false;
+        atlantisMistGroup.add(cylMesh);
+    }
+
+    scene.add(atlantisMistGroup);
+}
+
+// ==========================================
 // PROCEDURAL ENVIRONMENT GENERATION (PALM TREES, TROPICAL BUSHES & BOULDERS)
 // ==========================================
 function spawnEnvironmentObjects(scene, terrain) {
-    const palmTreesCount = 320;
-    const pineTreesCount = 130;
-    const rocksCount = 160;
-    const bushesCount = 340;
+    const palmTreesCount = 390;
+    const pineTreesCount = 190;
+    const rocksCount = 180;
+    const bushesCount = 420;
     
     // Procedural Coconut Palm Tree generator (seamless curved trunk & lush arching fronds)
     function createPalmTree() {
@@ -2317,112 +2470,634 @@ function spawnEnvironmentObjects(scene, terrain) {
         return treeGroup;
     }
     
-    // Procedural Tropical Canopy Tree / Maritime Pine generator
-    function createPineTree() {
-        const treeGroup = new THREE.Group();
-        
-        const trunkMat = new THREE.MeshStandardMaterial({
-            color: 0x7a6552,
-            flatShading: false,
-            roughness: 0.92
-        });
-        const foliageMat = new THREE.MeshStandardMaterial({
-            color: 0x227a38,
-            flatShading: false,
-            roughness: 0.80
-        });
-        
-        let curY = 0;
-        let curX = 0;
-        let curZ = 0;
-        const trunkSegments = 5;
-        const h = 0.6;
-        let rBottom = 0.28;
-        
-        for (let i = 0; i < trunkSegments; i++) {
-            const rTop = rBottom * 0.9;
-            const segGeo = new THREE.CylinderGeometry(rTop, rBottom, h, 6);
-            const seg = new THREE.Mesh(segGeo, trunkMat);
-            seg.castShadow = true;
-            seg.receiveShadow = true;
-            
-            seg.position.set(curX, curY + h/2, curZ);
-            
-            const angleX = 0.18 * Math.sin(i * 1.0);
-            const angleZ = 0.12 * Math.cos(i * 1.0);
-            seg.rotation.set(angleX, 0, angleZ);
-            
-            treeGroup.add(seg);
-            
-            curX += Math.sin(angleX) * h * 0.9;
-            curZ += Math.sin(angleZ) * h * 0.9;
-            curY += h * 0.9;
-            rBottom = rTop;
-        }
-        
-        const branches = [
-            { angleY: 0, tiltX: 0.5, tiltZ: 0.2, length: 1.6, scale: 0.8 },
-            { angleY: Math.PI * 2/3, tiltX: -0.3, tiltZ: 0.4, length: 1.8, scale: 0.75 },
-            { angleY: Math.PI * 4/3, tiltX: 0.2, tiltZ: -0.5, length: 1.5, scale: 0.7 }
-        ];
-        
-        for (const br of branches) {
-            const branchGroup = new THREE.Group();
-            branchGroup.position.set(curX, curY, curZ);
-            branchGroup.rotation.y = br.angleY;
-            
-            let brY = 0;
-            let brX = 0;
-            let brZ = 0;
-            let brRad = rBottom * br.scale;
-            const brSegs = 4;
-            const brH = br.length / brSegs;
-            
-            for (let j = 0; j < brSegs; j++) {
-                const nextRad = brRad * 0.85;
-                const segGeo = new THREE.CylinderGeometry(nextRad, brRad, brH, 5);
-                const seg = new THREE.Mesh(segGeo, trunkMat);
-                seg.castShadow = true;
-                seg.receiveShadow = true;
-                
-                const tiltX = br.tiltX * (1.0 + j * 0.1);
-                const tiltZ = br.tiltZ * (1.0 + j * 0.15);
-                seg.rotation.set(tiltX, 0, tiltZ);
-                seg.position.set(brX, brY + brH/2, brZ);
-                
-                branchGroup.add(seg);
-                
-                brX += Math.sin(tiltX) * brH * 0.95;
-                brZ += Math.sin(tiltZ) * brH * 0.95;
-                brY += brH * Math.cos(tiltX) * 0.95;
-                brRad = nextRad;
-            }
-            
-            const foliageDome = new THREE.Group();
-            foliageDome.position.set(brX, brY, brZ);
-            
-            const cloudParts = 6 + Math.floor(Math.random() * 3);
-            for (let p = 0; p < cloudParts; p++) {
-                const rad = 0.95 + Math.random() * 0.6;
-                const geo = new THREE.DodecahedronGeometry(rad, 1);
-                const mesh = new THREE.Mesh(geo, foliageMat);
-                mesh.castShadow = true;
-                
-                const px = (Math.random() - 0.5) * 1.5;
-                const pz = (Math.random() - 0.5) * 1.5;
-                const py = (rad * 0.25) + (Math.random() - 0.5) * 0.15;
-                
-                mesh.position.set(px, py, pz);
-                mesh.scale.set(1.4, 0.65 + Math.random() * 0.2, 1.2);
-                foliageDome.add(mesh);
-            }
-            branchGroup.add(foliageDome);
-            treeGroup.add(branchGroup);
-        }
-        
-        return treeGroup;
+    // =========================================================
+    // REALISTIC TROPICAL BROADLEAF TREES & UNDERGROWTH SYSTEM
+    // =========================================================
+    function makeSeededRand(seed) {
+        let s = seed >>> 0;
+        return function () {
+            s = (s + 0x6D2B79F5) >>> 0;
+            let t = Math.imul(s ^ (s >>> 15), 1 | s);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
     }
-    
+
+    // 1. Procedural Weathered Tropical Hardwood Bark Texture (256x256 tileable)
+    function createTreeBarkTexture() {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const rnd = makeSeededRand(4021);
+
+        ctx.fillStyle = '#6b5846';
+        ctx.fillRect(0, 0, size, size);
+
+        // Longitudinal organic bark ridges & fissures (wrapped horizontally for seamless tiling)
+        for (let i = 0; i < 220; i++) {
+            const x = rnd() * size;
+            const y = rnd() * size;
+            const w = 2.0 + rnd() * 5.5;
+            const h = 28.0 + rnd() * 90.0;
+            const dark = rnd() < 0.52;
+            ctx.fillStyle = dark
+                ? `rgba(46, 35, 25, ${0.22 + rnd() * 0.30})`
+                : `rgba(138, 118, 96, ${0.18 + rnd() * 0.24})`;
+            for (const ox of [-size, 0, size]) {
+                for (const oy of [-size, 0, size]) {
+                    ctx.beginPath();
+                    ctx.ellipse(x + ox, y + oy, w * 0.5, h * 0.5, (rnd() - 0.5) * 0.08, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // Fine bark crevices & subtle coastal moss/lichen flecks
+        for (let i = 0; i < 95; i++) {
+            const x = rnd() * size;
+            const y = rnd() * size;
+            if (rnd() < 0.35) {
+                ctx.fillStyle = `rgba(108, 118, 92, ${0.14 + rnd() * 0.16})`;
+                ctx.beginPath();
+                ctx.ellipse(x, y, 4 + rnd() * 8, 3 + rnd() * 6, rnd() * Math.PI, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.strokeStyle = `rgba(34, 25, 18, ${0.28 + rnd() * 0.25})`;
+                ctx.lineWidth = 1.0 + rnd() * 1.4;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.bezierCurveTo(x + (rnd() - 0.5) * 6, y + 18, x + (rnd() - 0.5) * 6, y + 36, x + (rnd() - 0.5) * 4, y + 54);
+                ctx.stroke();
+            }
+        }
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = 4;
+        return tex;
+    }
+
+    // Helper: draw one realistic pointed tropical leaf blade with midrib & lateral veins
+    function drawBotanicalLeaf(ctx, cx, cy, angle, length, halfWidth, darkRgb, lightRgb, tipRgb) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+
+        const grad = ctx.createLinearGradient(0, 0, 0, -length);
+        grad.addColorStop(0.0, `rgb(${darkRgb[0]}, ${darkRgb[1]}, ${darkRgb[2]})`);
+        grad.addColorStop(0.58, `rgb(${lightRgb[0]}, ${lightRgb[1]}, ${lightRgb[2]})`);
+        grad.addColorStop(1.0, `rgb(${tipRgb[0]}, ${tipRgb[1]}, ${tipRgb[2]})`);
+
+        // Pointed elliptic-obovate tropical leaf silhouette (wider slightly above middle, crisp drip-tip)
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(-halfWidth * 0.85, -length * 0.22, -halfWidth * 1.12, -length * 0.64, 0, -length);
+        ctx.bezierCurveTo(halfWidth * 1.12, -length * 0.64, halfWidth * 0.85, -length * 0.22, 0, 0);
+        ctx.closePath();
+
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(20, 52, 18, 0.52)';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+
+        // Central midrib vein
+        ctx.strokeStyle = 'rgba(138, 192, 78, 0.44)';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(0, -2);
+        ctx.lineTo(0, -length * 0.90);
+        ctx.stroke();
+
+        // Pinnate side veins
+        ctx.strokeStyle = 'rgba(128, 182, 72, 0.26)';
+        ctx.lineWidth = 0.9;
+        for (let v = 1; v <= 4; v++) {
+            const vy = -length * (0.18 + v * 0.16);
+            const vw = halfWidth * Math.sin((v / 5.2) * Math.PI) * 0.72;
+            ctx.beginPath();
+            ctx.moveTo(0, vy);
+            ctx.quadraticCurveTo(-vw * 0.5, vy - 4, -vw, vy - 9);
+            ctx.moveTo(0, vy);
+            ctx.quadraticCurveTo(vw * 0.5, vy - 4, vw, vy - 9);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    // Bleed leaf green RGB into alpha=0 pixels so WebGL mipmaps never show dark halos
+    function bleedFoliageAlphaEdges(ctx, size, rBg, gBg, bBg) {
+        const img = ctx.getImageData(0, 0, size, size);
+        const d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i + 3] < 28) {
+                d[i] = rBg;
+                d[i + 1] = gBg;
+                d[i + 2] = bBg;
+                d[i + 3] = 0;
+            } else if (d[i + 3] < 220) {
+                d[i + 3] = Math.min(255, Math.round(d[i + 3] * 1.35));
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+    }
+
+    // 2. Procedural Botanical Broadleaf Bough Cluster Texture (512x512 crisp alpha-cutout)
+    function createBroadleafCanopyTexture() {
+        const size = 512;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const rnd = makeSeededRand(9187);
+
+        ctx.clearRect(0, 0, size, size);
+
+        // Woody twig skeleton radiating from stem base (256, 494)
+        const subTwigs = [
+            { tx: 122, ty: 225, cpx: 195, cpy: 375 },
+            { tx: 182, ty: 118, cpx: 222, cpy: 300 },
+            { tx: 256, ty: 78,  cpx: 258, cpy: 275 },
+            { tx: 334, ty: 122, cpx: 292, cpy: 300 },
+            { tx: 392, ty: 228, cpx: 320, cpy: 375 }
+        ];
+
+        ctx.lineCap = 'round';
+        for (const tw of subTwigs) {
+            ctx.strokeStyle = '#56412e';
+            ctx.lineWidth = 5.5;
+            ctx.beginPath();
+            ctx.moveTo(256, 496);
+            ctx.quadraticCurveTo(tw.cpx, tw.cpy, tw.tx, tw.ty);
+            ctx.stroke();
+        }
+
+        // Layer 1: Deeper shaded under-leaves for rich 3D volume
+        for (let tIdx = 0; tIdx < subTwigs.length; tIdx++) {
+            const tw = subTwigs[tIdx];
+            const baseAng = Math.atan2(tw.tx - 256, 496 - tw.ty);
+            for (let s = 0; s < 5; s++) {
+                const u = 0.24 + (s / 4) * 0.72;
+                const om = 1 - u;
+                const bx = om * om * 256 + 2 * om * u * tw.cpx + u * u * tw.tx;
+                const by = om * om * 496 + 2 * om * u * tw.cpy + u * u * tw.ty;
+                const spread = (s % 2 === 0 ? -1 : 1) * (0.45 + rnd() * 0.35);
+                const len = 88 + rnd() * 34;
+                const hw = 24 + rnd() * 9;
+                drawBotanicalLeaf(
+                    ctx, bx, by, baseAng + spread, len, hw,
+                    [24, 64, 22], [40, 96, 32], [54, 118, 38]
+                );
+            }
+        }
+
+        // Layer 2: Sunlit upper tropical leaves & terminal rosettes
+        for (let tIdx = 0; tIdx < subTwigs.length; tIdx++) {
+            const tw = subTwigs[tIdx];
+            const baseAng = Math.atan2(tw.tx - 256, 496 - tw.ty);
+            for (let s = 0; s < 5; s++) {
+                const u = 0.30 + (s / 4) * 0.70;
+                const om = 1 - u;
+                const bx = om * om * 256 + 2 * om * u * tw.cpx + u * u * tw.tx;
+                const by = om * om * 496 + 2 * om * u * tw.cpy + u * u * tw.ty;
+                const side = (s === 4) ? ((rnd() - 0.5) * 0.25) : ((s % 2 === 0 ? 1 : -1) * (0.28 + rnd() * 0.32));
+                const len = 84 + rnd() * 36;
+                const hw = 23 + rnd() * 9;
+                const warmBoost = Math.round(rnd() * 18);
+                drawBotanicalLeaf(
+                    ctx, bx, by, baseAng + side, len, hw,
+                    [32, 82, 26],
+                    [56 + warmBoost, 126 + warmBoost, 36],
+                    [78 + warmBoost, 152 + warmBoost, 44]
+                );
+            }
+        }
+
+        bleedFoliageAlphaEdges(ctx, size, 44, 102, 34);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.anisotropy = 4;
+        return tex;
+    }
+
+    // 3. Procedural Tropical Fern & Coastal Shrub Frond Texture (512x512 crisp alpha-cutout)
+    function createTropicalBushTexture() {
+        const size = 512;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const rnd = makeSeededRand(5513);
+
+        ctx.clearRect(0, 0, size, size);
+
+        // Central green fern/shrub rachis stem
+        ctx.strokeStyle = '#366b28';
+        ctx.lineWidth = 6.0;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(256, 500);
+        ctx.quadraticCurveTo(252, 260, 256, 36);
+        ctx.stroke();
+
+        // Pairs of lanceolate tropical fern pinnae & glossy coastal shrub leaves
+        const pairs = 15;
+        for (let i = 0; i < pairs; i++) {
+            const t = i / (pairs - 1);
+            const y = 472 - t * 405;
+            const profile = Math.sin(Math.pow(t, 0.72) * Math.PI * 0.94);
+            const len = (62 + profile * 128) * (0.92 + rnd() * 0.14);
+            const hw = (14 + profile * 16) * (0.9 + rnd() * 0.2);
+            const tilt = 1.08 - t * 0.52;
+            const bright = Math.round(t * 22);
+
+            drawBotanicalLeaf(
+                ctx, 256, y, -tilt, len, hw,
+                [26, 74, 26], [48 + bright, 118 + bright, 38], [72 + bright, 148 + bright, 46]
+            );
+            drawBotanicalLeaf(
+                ctx, 256, y - 4, tilt, len * 0.97, hw,
+                [26, 74, 26], [50 + bright, 120 + bright, 38], [74 + bright, 150 + bright, 46]
+            );
+        }
+        // Terminal tip blade
+        drawBotanicalLeaf(ctx, 256, 72, 0.0, 68, 15, [34, 92, 30], [68, 142, 44], [90, 165, 52]);
+
+        bleedFoliageAlphaEdges(ctx, size, 42, 100, 34);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.anisotropy = 4;
+        return tex;
+    }
+
+    // Continuous organic tapered wooden limb along a CatmullRomCurve3 (zero cylinder seams or gaps!)
+    function createTaperedLimbGeometry(points, rStart, rEnd, tubularSegs = 10, radialSegs = 8, rootButtress = 0.0) {
+        const curve = new THREE.CatmullRomCurve3(points);
+        const totalLen = Math.max(0.01, curve.getLength());
+        const positions = [];
+        const normals = [];
+        const uvs = [];
+        const indices = [];
+
+        const prevTangent = new THREE.Vector3();
+        const tangent = new THREE.Vector3();
+        const normal = new THREE.Vector3();
+        const binormal = new THREE.Vector3();
+        const rotQuat = new THREE.Quaternion();
+        const pt = new THREE.Vector3();
+        const vPos = new THREE.Vector3();
+        const vNorm = new THREE.Vector3();
+
+        for (let s = 0; s <= tubularSegs; s++) {
+            const t = s / tubularSegs;
+            curve.getPointAt(t, pt);
+            curve.getTangentAt(t, tangent);
+            if (tangent.lengthSq() > 1e-8) tangent.normalize(); else tangent.set(0, 1, 0);
+
+            if (s === 0) {
+                const ref = Math.abs(tangent.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+                normal.crossVectors(tangent, ref).normalize();
+            } else {
+                rotQuat.setFromUnitVectors(prevTangent, tangent);
+                normal.applyQuaternion(rotQuat);
+                normal.addScaledVector(tangent, -normal.dot(tangent));
+                if (normal.lengthSq() > 1e-8) normal.normalize(); else normal.set(1, 0, 0);
+            }
+            binormal.crossVectors(tangent, normal).normalize();
+            prevTangent.copy(tangent);
+
+            const baseR = THREE.MathUtils.lerp(rStart, rEnd, Math.pow(t, 0.76));
+            const vCoord = (t * totalLen) * 0.55;
+
+            for (let r = 0; r <= radialSegs; r++) {
+                const u = r / radialSegs;
+                const theta = u * Math.PI * 2.0;
+                const buttress = rootButtress > 0.0
+                    ? (1.0 + rootButtress * Math.exp(-t * 5.2) * (0.5 + 0.5 * Math.cos(theta * 4.0 + 0.35)))
+                    : 1.0;
+                const gnarl = 1.0 + 0.045 * Math.sin(theta * 3.0 + t * 8.0);
+                const rad = baseR * buttress * gnarl;
+
+                const cosT = Math.cos(theta);
+                const sinT = Math.sin(theta);
+
+                vNorm.set(
+                    normal.x * cosT + binormal.x * sinT,
+                    normal.y * cosT + binormal.y * sinT,
+                    normal.z * cosT + binormal.z * sinT
+                ).normalize();
+
+                vPos.copy(pt).addScaledVector(vNorm, rad);
+                positions.push(vPos.x, vPos.y, vPos.z);
+                normals.push(vNorm.x, vNorm.y, vNorm.z);
+                uvs.push(u * 1.5, vCoord);
+            }
+        }
+
+        const ringVerts = radialSegs + 1;
+        for (let s = 0; s < tubularSegs; s++) {
+            for (let r = 0; r < radialSegs; r++) {
+                const a = s * ringVerts + r;
+                const b = (s + 1) * ringVerts + r;
+                const c = (s + 1) * ringVerts + (r + 1);
+                const d = s * ringVerts + (r + 1);
+                // Outward counter-clockwise winding matching +vNorm
+                indices.push(a, d, b);
+                indices.push(d, c, b);
+            }
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(indices);
+        return geo;
+    }
+
+    // 3x3 Curved 3D Botanical Leaf-Spray Patch with Spherical Canopy Normals & Sun/AO Vertex Colors
+    function createCurvedLeafSprayGeo(origin, yaw, pitch, roll, width, length, archDrop, clusterCenter, shadeFactor) {
+        const nx = 2;
+        const nz = 2;
+        const positions = [];
+        const normals = [];
+        const uvs = [];
+        const colors = [];
+        const indices = [];
+
+        const euler = new THREE.Euler(pitch, yaw, roll, 'YXZ');
+        const quat = new THREE.Quaternion().setFromEuler(euler);
+        const cardUp = new THREE.Vector3(0, 1, 0).applyQuaternion(quat).normalize();
+        const localPos = new THREE.Vector3();
+        const outDir = new THREE.Vector3();
+
+        for (let iz = 0; iz <= nz; iz++) {
+            const vz = iz / nz; // 0 = twig stem attachment, 1 = outer leaf tips
+            for (let ix = 0; ix <= nx; ix++) {
+                const ux = ix / nx;
+                const xCentered = ux - 0.5;
+                // Natural botanical downward arch + subtle lateral cupping for 3D silhouette from all angles
+                const lx = xCentered * width;
+                const lz = vz * length;
+                const ly = -archDrop * (vz * vz) - 0.14 * width * (xCentered * xCentered);
+
+                localPos.set(lx, ly, lz).applyQuaternion(quat).add(origin);
+                positions.push(localPos.x, localPos.y, localPos.z);
+                uvs.push(ux, vz);
+
+                // Spherical outward foliage normal (prevents X-card lighting seams and creates soft cloud-like sun shading!)
+                outDir.subVectors(localPos, clusterCenter);
+                if (outDir.lengthSq() > 1e-6) outDir.normalize(); else outDir.set(0, 1, 0);
+                outDir.multiplyScalar(0.78).addScaledVector(cardUp, 0.22);
+                outDir.y += 0.28;
+                outDir.normalize();
+                normals.push(outDir.x, outDir.y, outDir.z);
+
+                // Baked interior AO at twig base -> vibrant sunlit chlorophyll at outer leaf tips
+                const tipSun = THREE.MathUtils.lerp(0.66, 1.08, vz) * shadeFactor;
+                const rCol = Math.min(1.25, tipSun * 1.02);
+                const gCol = Math.min(1.25, tipSun * 1.05);
+                const bCol = Math.min(1.20, tipSun * 0.90);
+                colors.push(rCol, gCol, bCol);
+            }
+        }
+
+        const stride = nx + 1;
+        for (let iz = 0; iz < nz; iz++) {
+            for (let ix = 0; ix < nx; ix++) {
+                const a = iz * stride + ix;
+                const b = (iz + 1) * stride + ix;
+                const c = (iz + 1) * stride + (ix + 1);
+                const d = iz * stride + (ix + 1);
+                // Top surface (+Y) is front-facing counter-clockwise
+                indices.push(a, b, d);
+                indices.push(b, c, d);
+            }
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geo.setIndex(indices);
+        return geo;
+    }
+
+    // Builds an airy multi-tiered botanical leaf sub-crown around a branch tip
+    function addLeafSubCrown(foliageGeos, center, radiusScale, shadeFactor, rnd) {
+        const crownCore = new THREE.Vector3(center.x, center.y - 0.35 * radiusScale, center.z);
+        const outerCount = 5;
+        const baseYaw = rnd() * Math.PI * 2.0;
+
+        // 5 spreading outer umbrella sprays
+        for (let k = 0; k < outerCount; k++) {
+            const yaw = baseYaw + (k * Math.PI * 2.0) / outerCount + (rnd() - 0.5) * 0.28;
+            const pitch = 0.16 + rnd() * 0.24; // Drooping gently outward
+            const roll = (rnd() - 0.5) * 0.28;
+            const w = (1.65 + rnd() * 0.35) * radiusScale;
+            const l = (1.75 + rnd() * 0.35) * radiusScale;
+            const origin = new THREE.Vector3(
+                center.x - Math.sin(yaw) * 0.18 * radiusScale,
+                center.y + (rnd() - 0.3) * 0.22 * radiusScale,
+                center.z - Math.cos(yaw) * 0.18 * radiusScale
+            );
+            foliageGeos.push(createCurvedLeafSprayGeo(origin, yaw, pitch, roll, w, l, 0.34 * radiusScale, crownCore, shadeFactor));
+        }
+
+        // 3 upper/crossed crown sprays for full lush silhouette from side & underneath
+        for (let k = 0; k < 3; k++) {
+            const yaw = baseYaw + 0.55 + (k * Math.PI * 2.0) / 3.0 + (rnd() - 0.5) * 0.25;
+            const pitch = -0.18 + k * 0.22;
+            const roll = (rnd() - 0.5) * 0.42;
+            const w = (1.50 + rnd() * 0.30) * radiusScale;
+            const l = (1.55 + rnd() * 0.30) * radiusScale;
+            const origin = new THREE.Vector3(
+                center.x + (rnd() - 0.5) * 0.25 * radiusScale,
+                center.y + (0.18 + k * 0.12) * radiusScale,
+                center.z + (rnd() - 0.5) * 0.25 * radiusScale
+            );
+            foliageGeos.push(createCurvedLeafSprayGeo(origin, yaw, pitch, roll, w, l, 0.26 * radiusScale, crownCore, shadeFactor * 1.05));
+        }
+    }
+
+    // Species A: Picturesque Spreading Coastal Umbrella / Sea-Almond Tree (~8.0m tall, ~7.4m wide crown)
+    function buildCoastalUmbrellaTreeGeos() {
+        const rnd = makeSeededRand(7741);
+        const trunkGeos = [];
+        const foliageGeos = [];
+
+        // Sinuous buttressed main trunk (buried 0.3m at base so hillsides never show floating roots)
+        const trunkPts = [
+            new THREE.Vector3(0.0, -0.32, 0.0),
+            new THREE.Vector3(0.08, 1.05, 0.04),
+            new THREE.Vector3(0.20, 2.30, -0.06),
+            new THREE.Vector3(0.14, 3.55, 0.05)
+        ];
+        trunkGeos.push(createTaperedLimbGeometry(trunkPts, 0.40, 0.21, 11, 9, 0.46));
+
+        const boughDefs = [
+            { y0: 2.95, dirX:  0.96, dirZ:  0.22, reach: 2.85, rise: 1.75, r0: 0.16, scale: 1.05, shade: 0.90 },
+            { y0: 3.30, dirX:  0.28, dirZ:  0.96, reach: 2.55, rise: 2.40, r0: 0.155, scale: 1.00, shade: 0.98 },
+            { y0: 3.05, dirX: -0.88, dirZ:  0.46, reach: 2.75, rise: 1.85, r0: 0.155, scale: 1.04, shade: 0.88 },
+            { y0: 3.48, dirX: -0.62, dirZ: -0.78, reach: 2.15, rise: 3.10, r0: 0.165, scale: 1.06, shade: 1.04 },
+            { y0: 3.22, dirX:  0.58, dirZ: -0.81, reach: 2.45, rise: 2.35, r0: 0.15, scale: 0.98, shade: 0.95 },
+            { y0: 3.50, dirX:  0.08, dirZ:  0.05, reach: 0.35, rise: 3.55, r0: 0.145, scale: 1.08, shade: 1.08 }
+        ];
+
+        for (const b of boughDefs) {
+            const p0 = new THREE.Vector3(0.15, b.y0, 0.02);
+            const p1 = new THREE.Vector3(0.15 + b.dirX * b.reach * 0.36, b.y0 + b.rise * 0.42, 0.02 + b.dirZ * b.reach * 0.36);
+            const p2 = new THREE.Vector3(0.15 + b.dirX * b.reach * 0.74, b.y0 + b.rise * 0.78, 0.02 + b.dirZ * b.reach * 0.74);
+            const p3 = new THREE.Vector3(0.15 + b.dirX * b.reach, b.y0 + b.rise, 0.02 + b.dirZ * b.reach);
+
+            const bCurve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
+            trunkGeos.push(createTaperedLimbGeometry([p0, p1, p2, p3], b.r0, 0.048, 8, 7, 0.0));
+            addLeafSubCrown(foliageGeos, p3, b.scale, b.shade, rnd);
+
+            // 2 forked secondary limbs per primary bough
+            const perpX = -b.dirZ;
+            const perpZ = b.dirX;
+            for (let side of [-1, 1]) {
+                const tFork = side < 0 ? 0.50 : 0.72;
+                const forkStart = bCurve.getPointAt(tFork);
+                const subReach = 1.05 + rnd() * 0.35;
+                const subEnd = new THREE.Vector3(
+                    forkStart.x + (b.dirX * 0.65 + perpX * side * 0.72) * subReach,
+                    forkStart.y + 0.55 + rnd() * 0.35,
+                    forkStart.z + (b.dirZ * 0.65 + perpZ * side * 0.72) * subReach
+                );
+                const subMid = forkStart.clone().lerp(subEnd, 0.5);
+                subMid.y += 0.14;
+                trunkGeos.push(createTaperedLimbGeometry([forkStart, subMid, subEnd], b.r0 * 0.52, 0.034, 5, 6, 0.0));
+                addLeafSubCrown(foliageGeos, subEnd, b.scale * 0.84, b.shade * 0.96, rnd);
+            }
+        }
+
+        return {
+            trunkGeo: BufferGeometryUtils.mergeGeometries(trunkGeos, false),
+            foliageGeo: BufferGeometryUtils.mergeGeometries(foliageGeos, false),
+            tempTrunk: trunkGeos,
+            tempFoliage: foliageGeos
+        };
+    }
+
+    // Species B: Taller Tropical Rainforest / Banyan-Fig Canopy Tree (~10.0m tall, multi-tiered crown)
+    function buildTropicalRainforestTreeGeos() {
+        const rnd = makeSeededRand(3319);
+        const trunkGeos = [];
+        const foliageGeos = [];
+
+        const trunkPts = [
+            new THREE.Vector3(0.0, -0.35, 0.0),
+            new THREE.Vector3(-0.06, 1.55, 0.05),
+            new THREE.Vector3(0.05, 3.35, -0.04),
+            new THREE.Vector3(-0.04, 5.10, 0.06)
+        ];
+        trunkGeos.push(createTaperedLimbGeometry(trunkPts, 0.44, 0.22, 12, 9, 0.54));
+
+        // 3 organic buttress root ribs anchoring base into tropical soil
+        for (let r = 0; r < 3; r++) {
+            const ang = (r * Math.PI * 2.0) / 3.0 + 0.4;
+            const rPts = [
+                new THREE.Vector3(Math.cos(ang) * 0.14, 1.35, Math.sin(ang) * 0.14),
+                new THREE.Vector3(Math.cos(ang) * 0.42, 0.45, Math.sin(ang) * 0.42),
+                new THREE.Vector3(Math.cos(ang) * 0.68, -0.30, Math.sin(ang) * 0.68)
+            ];
+            trunkGeos.push(createTaperedLimbGeometry(rPts, 0.11, 0.16, 5, 6, 0.0));
+        }
+
+        const boughDefs = [
+            // Lower spreading tier
+            { y0: 4.15, dirX:  0.94, dirZ: -0.34, reach: 2.65, rise: 1.55, r0: 0.15, scale: 1.00, shade: 0.86 },
+            { y0: 4.35, dirX: -0.82, dirZ: -0.57, reach: 2.55, rise: 1.65, r0: 0.15, scale: 1.00, shade: 0.88 },
+            { y0: 4.25, dirX: -0.10, dirZ:  0.99, reach: 2.60, rise: 1.60, r0: 0.15, scale: 1.02, shade: 0.88 },
+            // Upper ascending rainforest crown tier
+            { y0: 4.95, dirX:  0.65, dirZ:  0.76, reach: 2.05, rise: 3.15, r0: 0.16, scale: 1.06, shade: 1.02 },
+            { y0: 5.00, dirX: -0.76, dirZ:  0.65, reach: 1.95, rise: 3.25, r0: 0.155, scale: 1.05, shade: 1.02 },
+            { y0: 5.05, dirX:  0.12, dirZ: -0.99, reach: 1.90, rise: 3.10, r0: 0.15, scale: 1.04, shade: 1.00 },
+            // High sunlit emergent apex
+            { y0: 5.05, dirX:  0.04, dirZ:  0.04, reach: 0.25, rise: 4.10, r0: 0.15, scale: 1.12, shade: 1.10 }
+        ];
+
+        for (const b of boughDefs) {
+            const p0 = new THREE.Vector3(-0.02, b.y0, 0.04);
+            const p1 = new THREE.Vector3(-0.02 + b.dirX * b.reach * 0.40, b.y0 + b.rise * 0.45, 0.04 + b.dirZ * b.reach * 0.40);
+            const p2 = new THREE.Vector3(-0.02 + b.dirX * b.reach * 0.76, b.y0 + b.rise * 0.80, 0.04 + b.dirZ * b.reach * 0.76);
+            const p3 = new THREE.Vector3(-0.02 + b.dirX * b.reach, b.y0 + b.rise, 0.04 + b.dirZ * b.reach);
+
+            const bCurve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
+            trunkGeos.push(createTaperedLimbGeometry([p0, p1, p2, p3], b.r0, 0.048, 8, 7, 0.0));
+            addLeafSubCrown(foliageGeos, p3, b.scale, b.shade, rnd);
+
+            const perpX = -b.dirZ;
+            const perpZ = b.dirX;
+            for (let side of [-1, 1]) {
+                const forkStart = bCurve.getPointAt(side < 0 ? 0.55 : 0.76);
+                const subReach = 0.95 + rnd() * 0.35;
+                const subEnd = new THREE.Vector3(
+                    forkStart.x + (b.dirX * 0.6 + perpX * side * 0.75) * subReach,
+                    forkStart.y + 0.52 + rnd() * 0.30,
+                    forkStart.z + (b.dirZ * 0.6 + perpZ * side * 0.75) * subReach
+                );
+                const subMid = forkStart.clone().lerp(subEnd, 0.5);
+                subMid.y += 0.12;
+                trunkGeos.push(createTaperedLimbGeometry([forkStart, subMid, subEnd], b.r0 * 0.50, 0.034, 5, 6, 0.0));
+                addLeafSubCrown(foliageGeos, subEnd, b.scale * 0.82, b.shade * 0.96, rnd);
+            }
+        }
+
+        return {
+            trunkGeo: BufferGeometryUtils.mergeGeometries(trunkGeos, false),
+            foliageGeo: BufferGeometryUtils.mergeGeometries(foliageGeos, false),
+            tempTrunk: trunkGeos,
+            tempFoliage: foliageGeos
+        };
+    }
+
+    // Lush 2-Tier Tropical Fern & Coastal Shrub Rosette (replaces smooth green pillow blobs on the ground!)
+    function buildTropicalShrubGeometry() {
+        const rnd = makeSeededRand(6129);
+        const shrubGeos = [];
+        const shrubCore = new THREE.Vector3(0, -0.15, 0);
+
+        // Outer gracefully arching fern/shrub fronds
+        const outerFronds = 9;
+        for (let i = 0; i < outerFronds; i++) {
+            const yaw = (i * Math.PI * 2.0) / outerFronds + (rnd() - 0.5) * 0.22;
+            const pitch = 0.58 + rnd() * 0.22;
+            const roll = (rnd() - 0.5) * 0.18;
+            const origin = new THREE.Vector3(-Math.sin(yaw) * 0.06, 0.05, -Math.cos(yaw) * 0.06);
+            shrubGeos.push(createCurvedLeafSprayGeo(origin, yaw, pitch, roll, 0.95 + rnd() * 0.22, 1.48 + rnd() * 0.25, 0.42, shrubCore, 0.92));
+        }
+
+        // Inner upright sunlit young fronds
+        const innerFronds = 6;
+        for (let i = 0; i < innerFronds; i++) {
+            const yaw = (i * Math.PI * 2.0) / innerFronds + 0.32 + (rnd() - 0.5) * 0.22;
+            const pitch = 0.22 + rnd() * 0.18;
+            const roll = (rnd() - 0.5) * 0.18;
+            const origin = new THREE.Vector3(0, 0.10, 0);
+            shrubGeos.push(createCurvedLeafSprayGeo(origin, yaw, pitch, roll, 0.82 + rnd() * 0.18, 1.25 + rnd() * 0.20, 0.26, shrubCore, 1.06));
+        }
+
+        const merged = BufferGeometryUtils.mergeGeometries(shrubGeos, false);
+        shrubGeos.forEach(g => g.dispose());
+        return merged;
+    }
+
     // Group to hold env meshes. Centered relative to voxel terrain group
     const envGroup = new THREE.Group();
     envGroup.position.copy(terrain.group.position);
@@ -2461,35 +3136,19 @@ function spawnEnvironmentObjects(scene, terrain) {
     palmTrunkGeos.forEach(g => g.dispose());
     palmLeavesGeos.forEach(g => g.dispose());
     palmCoconutGeos.forEach(g => g.dispose());
-    
-    // Generate one temporary pine to extract and merge geometries
-    const tempPine = createPineTree();
-    const tempPineGroup = new THREE.Group();
-    tempPineGroup.add(tempPine);
-    tempPineGroup.updateMatrixWorld(true);
-    
-    const pineTrunkGeos = [];
-    const pineFoliageGeos = [];
-    
-    tempPine.traverse((child) => {
-        if (child.isMesh) {
-            const cloneGeo = child.geometry.clone();
-            cloneGeo.applyMatrix4(child.matrixWorld);
-            
-            const color = child.material.color.getHex();
-            if (color === 0x7a6552) {
-                pineTrunkGeos.push(cloneGeo);
-            } else if (color === 0x227a38) {
-                pineFoliageGeos.push(cloneGeo);
-            }
-        }
-    });
-    
-    const masterPineTrunkGeo = BufferGeometryUtils.mergeGeometries(pineTrunkGeos, true);
-    const masterPineFoliageGeo = BufferGeometryUtils.mergeGeometries(pineFoliageGeos, true);
-    
-    pineTrunkGeos.forEach(g => g.dispose());
-    pineFoliageGeos.forEach(g => g.dispose());
+
+    // Build Species A (Spreading Coastal Umbrella Tree) & Species B (Tall Tropical Rainforest Tree)
+    const speciesAData = buildCoastalUmbrellaTreeGeos();
+    const masterPineTrunkGeo = speciesAData.trunkGeo;
+    const masterPineFoliageGeo = speciesAData.foliageGeo;
+    speciesAData.tempTrunk.forEach(g => g.dispose());
+    speciesAData.tempFoliage.forEach(g => g.dispose());
+
+    const speciesBData = buildTropicalRainforestTreeGeos();
+    const masterPineBTrunkGeo = speciesBData.trunkGeo;
+    const masterPineBFoliageGeo = speciesBData.foliageGeo;
+    speciesBData.tempTrunk.forEach(g => g.dispose());
+    speciesBData.tempFoliage.forEach(g => g.dispose());
 
     // Create master rock geometry (natural weathered boulder cluster)
     const rockClusterGeos = [];
@@ -2526,54 +3185,94 @@ function spawnEnvironmentObjects(scene, terrain) {
         if (g !== masterRockGeo) g.dispose();
     });
 
-    // Create master Tropical Bush / Undergrowth Fern cluster geometry
-    const bushClusterGeos = [];
-    for (let b = 0; b < 5; b++) {
-        const bAngle = (b * Math.PI * 2) / 5 + (Math.random() - 0.5) * 0.3;
-        const bDist = (b === 0) ? 0.0 : (0.45 + Math.random() * 0.25);
-        const bRad = (b === 0) ? 0.75 : (0.50 + Math.random() * 0.22);
-        const bGeo = new THREE.DodecahedronGeometry(bRad, 1);
-        bGeo.scale(1.25, 0.65, 1.25);
-        bGeo.translate(Math.cos(bAngle) * bDist, bRad * 0.35, Math.sin(bAngle) * bDist);
-        bushClusterGeos.push(bGeo);
-    }
-    const masterBushGeo = BufferGeometryUtils.mergeGeometries(bushClusterGeos, true);
-    bushClusterGeos.forEach(g => {
-        if (g !== masterBushGeo) g.dispose();
-    });
+    // Build Botanical Tropical Fern & Shrub Rosette Geometry
+    const masterBushGeo = buildTropicalShrubGeometry();
 
-    // Materials
+    // Procedural Textures & Materials
+    const barkTexture = createTreeBarkTexture();
+    const broadleafTexture = createBroadleafCanopyTexture();
+    const bushFrondTexture = createTropicalBushTexture();
+
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x9c8874, flatShading: false, roughness: 0.92 });
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e8b3c, flatShading: false, roughness: 0.65, side: THREE.DoubleSide });
     const coconutMat = new THREE.MeshStandardMaterial({ color: 0x5a3d28, flatShading: false, roughness: 0.85 });
-    const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x7a6552, flatShading: false, roughness: 0.92 });
-    const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x227a38, flatShading: false, roughness: 0.80 });
+
+    const pineTrunkMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: barkTexture,
+        roughness: 0.92,
+        metalness: 0.0
+    });
+
+    const pineFoliageMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: broadleafTexture,
+        alphaTest: 0.34,
+        side: THREE.DoubleSide,
+        vertexColors: true,
+        roughness: 0.74,
+        metalness: 0.0
+    });
+    // Subtle sunlit chlorophyll subsurface glow when looking up through the canopy from underneath
+    pineFoliageMat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <lights_fragment_end>',
+            `#include <lights_fragment_end>
+             reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.24, 0.34, 0.12);`
+        );
+    };
+
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x6e6a63, flatShading: false, roughness: 0.90 });
-    const bushMat = new THREE.MeshStandardMaterial({ color: 0x267830, flatShading: false, roughness: 0.78 });
+
+    const bushMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: bushFrondTexture,
+        alphaTest: 0.34,
+        side: THREE.DoubleSide,
+        vertexColors: true,
+        roughness: 0.72,
+        metalness: 0.0
+    });
+    bushMat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <lights_fragment_end>',
+            `#include <lights_fragment_end>
+             reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.22, 0.32, 0.12);`
+        );
+    };
 
     // Initialize/clear global instance arrays
     palmInstances = [];
     pineInstances = [];
     rockInstances = [];
+    bushInstances = [];
+
+    const speciesACount = Math.ceil(pineTreesCount * 0.55);
+    const speciesBCount = pineTreesCount - speciesACount;
 
     // Instanced meshes
     instancedPalmsTrunk = new THREE.InstancedMesh(masterPalmTrunkGeo, trunkMat, palmTreesCount);
     instancedPalmsLeaves = new THREE.InstancedMesh(masterPalmLeavesGeo, leafMat, palmTreesCount);
     instancedPalmsCoconuts = new THREE.InstancedMesh(masterPalmCoconutGeo, coconutMat, palmTreesCount);
     
-    instancedPinesTrunk = new THREE.InstancedMesh(masterPineTrunkGeo, pineTrunkMat, pineTreesCount);
-    instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, pineTreesCount);
+    instancedPinesTrunk = new THREE.InstancedMesh(masterPineTrunkGeo, pineTrunkMat, speciesACount);
+    instancedPinesFoliage = new THREE.InstancedMesh(masterPineFoliageGeo, pineFoliageMat, speciesACount);
+
+    instancedPinesBTrunk = new THREE.InstancedMesh(masterPineBTrunkGeo, pineTrunkMat, speciesBCount);
+    instancedPinesBFoliage = new THREE.InstancedMesh(masterPineBFoliageGeo, pineFoliageMat, speciesBCount);
     
     instancedRocks = new THREE.InstancedMesh(masterRockGeo, rockMat, rocksCount);
-    const instancedBushes = new THREE.InstancedMesh(masterBushGeo, bushMat, bushesCount);
+    instancedBushes = new THREE.InstancedMesh(masterBushGeo, bushMat, bushesCount);
 
-    // Configure shadows
+    // Configure shadows (alphaTest foliage casts real dappled leaf shadows!)
     instancedPalmsTrunk.castShadow = true; instancedPalmsTrunk.receiveShadow = true;
     instancedPalmsLeaves.castShadow = true; instancedPalmsLeaves.receiveShadow = true;
     instancedPalmsCoconuts.castShadow = true;
     
     instancedPinesTrunk.castShadow = true; instancedPinesTrunk.receiveShadow = true;
     instancedPinesFoliage.castShadow = true; instancedPinesFoliage.receiveShadow = true;
+    instancedPinesBTrunk.castShadow = true; instancedPinesBTrunk.receiveShadow = true;
+    instancedPinesBFoliage.castShadow = true; instancedPinesBFoliage.receiveShadow = true;
     
     instancedRocks.castShadow = true; instancedRocks.receiveShadow = true;
     instancedBushes.castShadow = true; instancedBushes.receiveShadow = true;
@@ -2583,6 +3282,8 @@ function spawnEnvironmentObjects(scene, terrain) {
     envGroup.add(instancedPalmsCoconuts);
     envGroup.add(instancedPinesTrunk);
     envGroup.add(instancedPinesFoliage);
+    envGroup.add(instancedPinesBTrunk);
+    envGroup.add(instancedPinesBFoliage);
     envGroup.add(instancedRocks);
     envGroup.add(instancedBushes);
     
@@ -2596,33 +3297,37 @@ function spawnEnvironmentObjects(scene, terrain) {
         return true;
     }
     
-    // Spawning loop for Palm Trees (dense tropical clusters on atoll, volcano island & coastal beaches)
+    // Helper: uniform circular sampling across the Central Sacred Island + all 3 Concentric Land Rings (r = 0 .. 602m)
+    function sampleAtlantisPoint(maxR) {
+        const rad = Math.sqrt(Math.random()) * maxR;
+        const ang = Math.random() * Math.PI * 2.0;
+        return { wx: Math.cos(ang) * rad, wz: Math.sin(ang) * rad };
+    }
+
+    // Spawning loop for Palm Trees (golden beaches & lower coastal slopes across all 3 concentric rings + Inner Harbor)
     let attempts = 0;
     let treesPlaced = 0;
-    while (treesPlaced < palmTreesCount && attempts < 3200) {
+    while (treesPlaced < palmTreesCount && attempts < 5200) {
         attempts++;
-        const isCoreIsland = (treesPlaced < palmTreesCount * 0.78);
-        const wx = isCoreIsland ? ((Math.random() - 0.5) * 480.0) : ((Math.random() - 0.3) * 1100.0);
-        const wz = isCoreIsland ? ((Math.random() - 0.5) * 650.0) : ((Math.random() - 0.5) * 1100.0);
-        
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
-        
-        // Spawn range: between 120.4m (beaches) and 132.0m (tropical hillsides), keeping natural grove spacing
-        if (groundHeight > 120.4 && groundHeight < 132.0 && isFarEnough(wx, wz, 3.8)) {
+        const maxR = (treesPlaced < palmTreesCount * 0.30) ? 265.0 : 598.0;
+        const { wx, wz } = sampleAtlantisPoint(maxR);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+
+        // Spawn range: between 120.4m (beaches) and 136.5m (coastal terraces), keeping natural grove spacing
+        if (groundHeight > 120.4 && groundHeight < 136.5 && isFarEnough(wx, wz, 4.0)) {
             const y = groundHeight - 0.1;
             const rotationY = Math.random() * Math.PI * 2;
             const sc = 0.78 + Math.random() * 0.52;
-            
+
             const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(sc, sc, sc);
             const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
-            
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-            
+
             instancedPalmsTrunk.setMatrixAt(treesPlaced, matrix);
             instancedPalmsLeaves.setMatrixAt(treesPlaced, matrix);
             instancedPalmsCoconuts.setMatrixAt(treesPlaced, matrix);
-            
+
             palmInstances.push({
                 x: wx,
                 y: y,
@@ -2632,65 +3337,86 @@ function spawnEnvironmentObjects(scene, terrain) {
                 velocityY: 0,
                 falling: false
             });
-            
+
             spawnedPositions.push({ x: wx, z: wz });
             treesPlaced++;
         }
     }
-    
-    // Spawning loop for Tropical Canopy / Pine Trees (placed on island ridges and slopes)
+    instancedPalmsTrunk.count = treesPlaced;
+    instancedPalmsLeaves.count = treesPlaced;
+    instancedPalmsCoconuts.count = treesPlaced;
+
+    // Spawning loop for Realistic Tropical Broadleaf Trees (Species A Coastal Umbrella & Species B Rainforest Canopy)
     attempts = 0;
-    let pinesPlaced = 0;
-    while (pinesPlaced < pineTreesCount && attempts < 2000) {
+    let pinesAPlaced = 0;
+    let pinesBPlaced = 0;
+    while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 4500) {
         attempts++;
-        const wx = (Math.random() - 0.35) * 950.0;
-        const wz = (Math.random() - 0.5) * 950.0;
-        
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
-        
-        // Spawn canopy trees on slopes (124.0m up to 185.0m)
-        if (groundHeight >= 124.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.2)) {
+        const { wx, wz } = sampleAtlantisPoint(595.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+
+        // Spawn broadleaf trees on verdant ring ridges & Sacred Mountain lower/mid slopes (124.5m up to 176.0m)
+        if (groundHeight >= 124.5 && groundHeight < 176.0 && isFarEnough(wx, wz, 5.2)) {
             const y = groundHeight - 0.15;
             const rotationY = Math.random() * Math.PI * 2;
-            const sc = 0.85 + Math.random() * 0.50;
-            
+            const scXZ = 0.82 + Math.random() * 0.46;
+            const scY  = scXZ * (0.90 + Math.random() * 0.22);
+
             const position = new THREE.Vector3(wx, y, wz);
-            const scale = new THREE.Vector3(sc, sc, sc);
+            const scale = new THREE.Vector3(scXZ, scY, scXZ);
             const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
-            
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-            
-            instancedPinesTrunk.setMatrixAt(pinesPlaced, matrix);
-            instancedPinesFoliage.setMatrixAt(pinesPlaced, matrix);
-            
-            pineInstances.push({
-                x: wx,
-                y: y,
-                z: wz,
-                rotationY: rotationY,
-                scale: sc,
-                velocityY: 0,
-                falling: false
-            });
-            
+
+            // Use taller Rainforest Species B preferentially on higher inland hills (>138m) or alternate naturally
+            const wantSpeciesB = (groundHeight > 140.0 || Math.random() < 0.42) && (pinesBPlaced < speciesBCount);
+            const useB = wantSpeciesB || (pinesAPlaced >= speciesACount);
+
+            if (useB && pinesBPlaced < speciesBCount) {
+                instancedPinesBTrunk.setMatrixAt(pinesBPlaced, matrix);
+                instancedPinesBFoliage.setMatrixAt(pinesBPlaced, matrix);
+                pineInstances.push({
+                    isSpeciesB: true,
+                    localIdx: pinesBPlaced,
+                    x: wx, y: y, z: wz,
+                    rotationY: rotationY,
+                    scaleX: scXZ, scaleY: scY, scaleZ: scXZ,
+                    velocityY: 0, falling: false
+                });
+                pinesBPlaced++;
+            } else if (pinesAPlaced < speciesACount) {
+                instancedPinesTrunk.setMatrixAt(pinesAPlaced, matrix);
+                instancedPinesFoliage.setMatrixAt(pinesAPlaced, matrix);
+                pineInstances.push({
+                    isSpeciesB: false,
+                    localIdx: pinesAPlaced,
+                    x: wx, y: y, z: wz,
+                    rotationY: rotationY,
+                    scaleX: scXZ, scaleY: scY, scaleZ: scXZ,
+                    velocityY: 0, falling: false
+                });
+                pinesAPlaced++;
+            }
+
             spawnedPositions.push({ x: wx, z: wz });
-            pinesPlaced++;
         }
     }
+    instancedPinesTrunk.count = pinesAPlaced;
+    instancedPinesFoliage.count = pinesAPlaced;
+    instancedPinesBTrunk.count = pinesBPlaced;
+    instancedPinesBFoliage.count = pinesBPlaced;
 
-    // Spawning loop for Lush Tropical Undergrowth Bushes
+    // Spawning loop for Lush Tropical Fern & Shrub Rosettes across all 3 concentric rings
     attempts = 0;
     let bushesPlaced = 0;
-    while (bushesPlaced < bushesCount && attempts < 2800) {
+    while (bushesPlaced < bushesCount && attempts < 4500) {
         attempts++;
-        const wx = (Math.random() - 0.45) * 650.0;
-        const wz = (Math.random() - 0.5) * 700.0;
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
-        if (groundHeight >= 121.2 && groundHeight < 155.0) {
-            const y = groundHeight - 0.12;
-            const scX = 0.7 + Math.random() * 0.9;
-            const scY = 0.6 + Math.random() * 0.7;
-            const scZ = 0.7 + Math.random() * 0.9;
+        const { wx, wz } = sampleAtlantisPoint(598.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+        if (groundHeight >= 121.4 && groundHeight < 168.0) {
+            const y = groundHeight - 0.08;
+            const scX = 0.75 + Math.random() * 0.75;
+            const scY = 0.70 + Math.random() * 0.65;
+            const scZ = scX * (0.9 + Math.random() * 0.2);
             const rotY = Math.random() * Math.PI * 2;
             const matrix = new THREE.Matrix4().compose(
                 new THREE.Vector3(wx, y, wz),
@@ -2698,23 +3424,27 @@ function spawnEnvironmentObjects(scene, terrain) {
                 new THREE.Vector3(scX, scY, scZ)
             );
             instancedBushes.setMatrixAt(bushesPlaced, matrix);
+            bushInstances.push({
+                x: wx, y: y, z: wz,
+                rotY: rotY, scX: scX, scY: scY, scZ: scZ,
+                velocityY: 0, falling: false
+            });
             bushesPlaced++;
         }
     }
+    instancedBushes.count = bushesPlaced;
     instancedBushes.instanceMatrix.needsUpdate = true;
     instancedBushes.matrixAutoUpdate = false;
- 
-    // Spawning loop for Rocks
+
+    // Spawning loop for Weathered Boulders (along shores, canal banks & Sacred Mountain slopes)
     attempts = 0;
     let rocksPlaced = 0;
-    while (rocksPlaced < rocksCount && attempts < 1200) {
+    while (rocksPlaced < rocksCount && attempts < 3200) {
         attempts++;
-        const wx = (Math.random() - 0.5) * 700.0;
-        const wz = (Math.random() - 0.5) * 700.0;
-        
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 192.0);
-        
-        if (groundHeight > 110.0 && groundHeight < 185.0 && isFarEnough(wx, wz, 4.0)) {
+        const { wx, wz } = sampleAtlantisPoint(625.0);
+        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+
+        if (groundHeight > 112.0 && groundHeight < 205.0 && isFarEnough(wx, wz, 4.0)) {
             const y = groundHeight - 0.25;
             const scaleX = 0.8 + Math.random() * 1.0;
             const scaleY = 0.5 + Math.random() * 0.7;
@@ -2722,15 +3452,14 @@ function spawnEnvironmentObjects(scene, terrain) {
             const rotX = Math.random() * Math.PI;
             const rotY = Math.random() * Math.PI;
             const rotZ = Math.random() * Math.PI;
-            
+
             const position = new THREE.Vector3(wx, y, wz);
             const scale = new THREE.Vector3(scaleX, scaleY, scaleZ);
             const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, rotZ));
-            
             const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-            
+
             instancedRocks.setMatrixAt(rocksPlaced, matrix);
-            
+
             rockInstances.push({
                 x: wx,
                 y: y,
@@ -2744,11 +3473,12 @@ function spawnEnvironmentObjects(scene, terrain) {
                 velocityY: 0,
                 falling: false
             });
-            
+
             spawnedPositions.push({ x: wx, z: wz });
             rocksPlaced++;
         }
     }
+    instancedRocks.count = rocksPlaced;
 
     // Flag instance matrices for update
     instancedPalmsTrunk.instanceMatrix.needsUpdate = true;
@@ -2756,14 +3486,18 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedPalmsCoconuts.instanceMatrix.needsUpdate = true;
     instancedPinesTrunk.instanceMatrix.needsUpdate = true;
     instancedPinesFoliage.instanceMatrix.needsUpdate = true;
+    instancedPinesBTrunk.instanceMatrix.needsUpdate = true;
+    instancedPinesBFoliage.instanceMatrix.needsUpdate = true;
     instancedRocks.instanceMatrix.needsUpdate = true;
-    
+
     // Disable autoUpdate on instanced components as they are static
     instancedPalmsTrunk.matrixAutoUpdate = false;
     instancedPalmsLeaves.matrixAutoUpdate = false;
     instancedPalmsCoconuts.matrixAutoUpdate = false;
     instancedPinesTrunk.matrixAutoUpdate = false;
     instancedPinesFoliage.matrixAutoUpdate = false;
+    instancedPinesBTrunk.matrixAutoUpdate = false;
+    instancedPinesBFoliage.matrixAutoUpdate = false;
     instancedRocks.matrixAutoUpdate = false;
 }
 
@@ -2771,9 +3505,9 @@ function updateHeightmap(nearPos, radius) {
     if (!terrain) return;
     const width = 512;
     const depth = 512;
-    const minWorldX = -860.0;
+    const minWorldX = -1152.0;
     const minWorldZ = -1152.0;
-    const texelSize = 4.5; // 512 * 4.5m = 2304m x 2304m covering the entire archipelago
+    const texelSize = 4.5; // 512 * 4.5m = 2304m x 2304m symmetrically centered on Plato's Atlantis
     const scale = 3.0; // voxelScale
 
     let minX = 0, maxX = width - 1;
@@ -2803,10 +3537,10 @@ function updateHeightmap(nearPos, radius) {
 
             if (terrain.modifiedColumns.has(`${ivx},${ivz}`)) {
                 // Column was sculpted/dug: scan vertically with smooth sub-voxel zero-crossing interpolation
-                for (let y = 44; y >= 0; y--) {
+                for (let y = 45; y >= 0; y--) {
                     const d0 = terrain.getDensity(ivx, y, ivz);
                     if (d0 >= 0.0) {
-                        if (y < 44) {
+                        if (y < 45) {
                             const d1 = terrain.getDensity(ivx, y + 1, ivz);
                             const denom = d0 - d1;
                             surfaceY = denom > 1e-5 ? (y + d0 / denom) : y;
@@ -2851,8 +3585,7 @@ function updateHeightmap(nearPos, radius) {
 function checkFoliageFalling(nearPos, radius = 6.0) {
     if (!terrain) return;
     const checkRadiusSq = (radius + 8.0) * (radius + 8.0);
-    
-    // Check palms
+
     for (let i = 0; i < palmInstances.length; i++) {
         const inst = palmInstances[i];
         if (inst.falling) continue;
@@ -2862,15 +3595,14 @@ function checkFoliageFalling(nearPos, radius = 6.0) {
             if (dx * dx + dz * dz > checkRadiusSq) continue;
         }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.1;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
             inst.velocityY = 0;
         }
     }
-    
-    // Check pines
+
     for (let i = 0; i < pineInstances.length; i++) {
         const inst = pineInstances[i];
         if (inst.falling) continue;
@@ -2880,15 +3612,31 @@ function checkFoliageFalling(nearPos, radius = 6.0) {
             if (dx * dx + dz * dz > checkRadiusSq) continue;
         }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.15;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
             inst.velocityY = 0;
         }
     }
-    
-    // Check rocks
+
+    for (let i = 0; i < bushInstances.length; i++) {
+        const inst = bushInstances[i];
+        if (inst.falling) continue;
+        if (nearPos) {
+            const dx = inst.x - nearPos.x;
+            const dz = inst.z - nearPos.z;
+            if (dx * dx + dz * dz > checkRadiusSq) continue;
+        }
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
+        const targetY = groundHeight - 0.08;
+        if (inst.y > targetY + 0.1) {
+            inst.falling = true;
+            inst.velocityY = 0;
+        }
+    }
+
     for (let i = 0; i < rockInstances.length; i++) {
         const inst = rockInstances[i];
         if (inst.falling) continue;
@@ -2898,7 +3646,7 @@ function checkFoliageFalling(nearPos, radius = 6.0) {
             if (dx * dx + dz * dz > checkRadiusSq) continue;
         }
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.25;
         if (inst.y > targetY + 0.1) {
             inst.falling = true;
@@ -2909,109 +3657,147 @@ function checkFoliageFalling(nearPos, radius = 6.0) {
 
 function updateFoliagePhysics(delta) {
     let palmUpdated = false;
-    let pineUpdated = false;
+    let pineAUpdated = false;
+    let pineBUpdated = false;
+    let bushUpdated = false;
     let rockUpdated = false;
-    
+
     const gravityForce = 9.81;
-    
-    // Update palms
+
     for (let i = 0; i < palmInstances.length; i++) {
         const inst = palmInstances[i];
         if (!inst.falling) continue;
-        
+
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.1;
-        
+
         inst.velocityY -= gravityForce * delta;
         inst.y += inst.velocityY * delta;
-        
+
         if (inst.y <= targetY) {
             inst.y = targetY;
             inst.velocityY = 0;
             inst.falling = false;
         }
-        
+
         const position = new THREE.Vector3(inst.x, inst.y, inst.z);
         const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, inst.rotationY, 0));
         const scale = new THREE.Vector3(inst.scale, inst.scale, inst.scale);
         const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-        
+
         instancedPalmsTrunk.setMatrixAt(i, matrix);
         instancedPalmsLeaves.setMatrixAt(i, matrix);
         instancedPalmsCoconuts.setMatrixAt(i, matrix);
         palmUpdated = true;
     }
-    
-    // Update pines
+
     for (let i = 0; i < pineInstances.length; i++) {
         const inst = pineInstances[i];
         if (!inst.falling) continue;
-        
+
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.15;
-        
+
         inst.velocityY -= gravityForce * delta;
         inst.y += inst.velocityY * delta;
-        
+
         if (inst.y <= targetY) {
             inst.y = targetY;
             inst.velocityY = 0;
             inst.falling = false;
         }
-        
+
         const position = new THREE.Vector3(inst.x, inst.y, inst.z);
         const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, inst.rotationY, 0));
-        const scale = new THREE.Vector3(inst.scale, inst.scale, inst.scale);
+        const scale = new THREE.Vector3(inst.scaleX, inst.scaleY, inst.scaleZ);
         const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-        
-        instancedPinesTrunk.setMatrixAt(i, matrix);
-        instancedPinesFoliage.setMatrixAt(i, matrix);
-        pineUpdated = true;
+
+        if (inst.isSpeciesB) {
+            instancedPinesBTrunk.setMatrixAt(inst.localIdx, matrix);
+            instancedPinesBFoliage.setMatrixAt(inst.localIdx, matrix);
+            pineBUpdated = true;
+        } else {
+            instancedPinesTrunk.setMatrixAt(inst.localIdx, matrix);
+            instancedPinesFoliage.setMatrixAt(inst.localIdx, matrix);
+            pineAUpdated = true;
+        }
     }
-    
-    // Update rocks
+
+    for (let i = 0; i < bushInstances.length; i++) {
+        const inst = bushInstances[i];
+        if (!inst.falling) continue;
+
+        const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
+        const targetY = groundHeight - 0.08;
+
+        inst.velocityY -= gravityForce * delta;
+        inst.y += inst.velocityY * delta;
+
+        if (inst.y <= targetY) {
+            inst.y = targetY;
+            inst.velocityY = 0;
+            inst.falling = false;
+        }
+
+        const matrix = new THREE.Matrix4().compose(
+            new THREE.Vector3(inst.x, inst.y, inst.z),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(0, inst.rotY, 0)),
+            new THREE.Vector3(inst.scX, inst.scY, inst.scZ)
+        );
+        instancedBushes.setMatrixAt(i, matrix);
+        bushUpdated = true;
+    }
+
     for (let i = 0; i < rockInstances.length; i++) {
         const inst = rockInstances[i];
         if (!inst.falling) continue;
-        
+
         const worldPos = new THREE.Vector3(inst.x + terrain.group.position.x, 0, inst.z + terrain.group.position.z);
-        const groundHeight = terrain.getSurfaceHeight(worldPos, 192.0);
+        const groundHeight = terrain.getSurfaceHeight(worldPos, 255.0);
         const targetY = groundHeight - 0.25;
-        
+
         inst.velocityY -= gravityForce * delta;
         inst.y += inst.velocityY * delta;
-        
+
         if (inst.y <= targetY) {
             inst.y = targetY;
             inst.velocityY = 0;
             inst.falling = false;
         }
-        
+
         const position = new THREE.Vector3(inst.x, inst.y, inst.z);
         const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(inst.rotX, inst.rotY, inst.rotZ));
         const scale = new THREE.Vector3(inst.scaleX, inst.scaleY, inst.scaleZ);
         const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-        
+
         instancedRocks.setMatrixAt(i, matrix);
         rockUpdated = true;
     }
-    
+
     if (palmUpdated) {
         instancedPalmsTrunk.instanceMatrix.needsUpdate = true;
         instancedPalmsLeaves.instanceMatrix.needsUpdate = true;
         instancedPalmsCoconuts.instanceMatrix.needsUpdate = true;
     }
-    if (pineUpdated) {
+    if (pineAUpdated) {
         instancedPinesTrunk.instanceMatrix.needsUpdate = true;
         instancedPinesFoliage.instanceMatrix.needsUpdate = true;
+    }
+    if (pineBUpdated) {
+        instancedPinesBTrunk.instanceMatrix.needsUpdate = true;
+        instancedPinesBFoliage.instanceMatrix.needsUpdate = true;
+    }
+    if (bushUpdated) {
+        instancedBushes.instanceMatrix.needsUpdate = true;
     }
     if (rockUpdated) {
         instancedRocks.instanceMatrix.needsUpdate = true;
     }
-    
-    if (palmUpdated || pineUpdated || rockUpdated) {
+
+    if (palmUpdated || pineAUpdated || pineBUpdated || bushUpdated || rockUpdated) {
         renderer.shadowMap.needsUpdate = true;
     }
 }

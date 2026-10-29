@@ -13,8 +13,8 @@ export class WaterSystem {
         this.voxelScale = 3.0;
         this.seaLevel = 120.0;
 
-        // Limiti della maschera 2D che copre l'intero arcipelago (2048m x 2048m)
-        this.maskMinX = -724.0;
+        // Limiti della maschera 2D centrata simmetricamente sull'arcipelago circolare di Atlantide (2048m x 2048m)
+        this.maskMinX = -1024.0;
         this.maskMinZ = -1024.0;
         this.maskSize = 2048.0;
         this.maskRes = 512;

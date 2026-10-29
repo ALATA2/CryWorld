@@ -8,6 +8,7 @@ import { VoxelTerrain } from "./marching_cubes.js";
 // ==========================================
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun;
+let atlantisMistGroup = null, atlantisMistUniforms = null;
 let heightmapData = null, heightmapTexture = null;
 let raycaster;
 let brushRing, brushDisc;
@@ -21,12 +22,12 @@ let isLeftMouseDown = false;
 let isRightMouseDown = false;
 let keyStates = {};
 let camYaw = 0;
-let camPitch = -0.15;
-let playerPos = new THREE.Vector3(0, 126, 300); // Start on island plateau
+let camPitch = -0.22;
+let playerPos = new THREE.Vector3(46, 168, 120); // Panoramic drone view over Sacred Mountain, Grand Canal & 3 Rings
 let playerVelocity = new THREE.Vector3();
 let camMode = "drone"; // "drone" (freecam fly), "walk" (grounded FPS physics), "topdown"
-let savedDronePos = new THREE.Vector3(0, 150, 300);
-let savedDronePitch = -0.2;
+let savedDronePos = new THREE.Vector3(46, 168, 120);
+let savedDronePitch = -0.22;
 let isGrounded = false;
 
 // Editor Tools Configuration
@@ -111,7 +112,7 @@ function showToast(msg) {
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff);
-    scene.fog = new THREE.Fog(0x8ce3ff, 250, 750); // Exact gameplay fog distance!
+    scene.fog = new THREE.Fog(0x8ce3ff, 460, 1060); // Clear panoramic view across all 3 concentric rings + Mist Ring!
 
     clock = new THREE.Clock();
     raycaster = new THREE.Raycaster();
@@ -336,7 +337,7 @@ function init() {
          vec3 finalColor = outgoingLight;
          if (eye.y >= worldPosition.y) {
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-860.0, -1152.0)) / 2304.0;
+             vec2 hmUV = (worldPosition.xz - vec2(-1152.0, -1152.0)) / 2304.0;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -369,6 +370,16 @@ function init() {
              float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
              distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
              distAlpha = max(distAlpha, shoreLace * 0.55);
+
+             // Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
+             float rAtlantisW = length(worldPosition.xz);
+             float seaMistBand = smoothstep(615.0, 685.0, rAtlantisW) * (1.0 - smoothstep(785.0, 860.0, rAtlantisW));
+             if (seaMistBand > 0.001) {
+                 float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
+                 float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
+                 finalColor = mix(finalColor, vec3(0.84, 0.94, 0.99), mistAmt * 0.88);
+                 distAlpha = max(distAlpha, mistAmt * 0.95);
+             }
          }
          float distH = length(worldPosition.xz - cameraPos.xz);
          if (eye.y >= worldPosition.y) {
@@ -382,7 +393,8 @@ function init() {
 
     // Marching Cubes Voxel Terrain (Planetary Engine with Height 88 voxels)
     terrain = new VoxelTerrain(scene, 256, 88, 256, 3.0);
-    terrain.updateChunksAroundPlayer(playerPos, 850);
+    createAtlantisMistRing(scene);
+    terrain.updateChunksAroundPlayer(playerPos, 1000);
 
     // Auto-load custom map from localStorage if present
     try {
@@ -819,7 +831,7 @@ function updateHeightmap(nearPos, radius) {
     if (!terrain || !heightmapData) return;
     const width = 512;
     const depth = 512;
-    const minWorldX = -860.0;
+    const minWorldX = -1152.0;
     const minWorldZ = -1152.0;
     const texelSize = 4.5;
     const scale = 3.0;
@@ -1075,30 +1087,77 @@ function spawnFoliageItem(x, y, z, type, save = true) {
     const group = new THREE.Group();
 
     if (type === "palm") {
-        // Tropical palm with curved trunk and fronds
-        const trunkGeo = new THREE.CylinderGeometry(0.35, 0.55, 6, 7);
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0xa18f7c, roughness: 0.9, flatShading: true });
+        // Tropical coconut palm with graceful curved trunk & arching frond crown
+        const leanX = (Math.random() - 0.5) * 1.1;
+        const leanZ = (Math.random() - 0.5) * 1.1;
+        const palmCurve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(0, -0.1, 0),
+            new THREE.Vector3(leanX * 0.35, 2.2, leanZ * 0.35),
+            new THREE.Vector3(leanX * 0.85, 4.6, leanZ * 0.85),
+            new THREE.Vector3(leanX, 6.6, leanZ)
+        ]);
+        const trunkGeo = new THREE.TubeGeometry(palmCurve, 9, 0.24, 7, false);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x9c8874, roughness: 0.92 });
         const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 3;
-        trunk.rotation.z = (Math.random() - 0.5) * 0.2;
+        group.add(trunk);
 
-        const frondsGeo = new THREE.ConeGeometry(3.6, 2.2, 7);
-        const frondsMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.8, flatShading: true });
-        const fronds = new THREE.Mesh(frondsGeo, frondsMat);
-        fronds.position.y = 6.2;
-        group.add(trunk, fronds);
+        const frondMat = new THREE.MeshStandardMaterial({ color: 0x2e8b3c, roughness: 0.65, side: THREE.DoubleSide });
+        for (let i = 0; i < 9; i++) {
+            const ang = (i / 9) * Math.PI * 2;
+            const frondCurve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(leanX, 6.6, leanZ),
+                new THREE.Vector3(leanX + Math.cos(ang) * 1.6, 6.95, leanZ + Math.sin(ang) * 1.6),
+                new THREE.Vector3(leanX + Math.cos(ang) * 3.2, 5.75, leanZ + Math.sin(ang) * 3.2)
+            ]);
+            const frondGeo = new THREE.TubeGeometry(frondCurve, 6, 0.14, 4, false);
+            frondGeo.scale(1.0, 0.25, 1.0);
+            group.add(new THREE.Mesh(frondGeo, frondMat));
+        }
     } else if (type === "pine") {
-        // Mountain conifer pine
-        const trunkGeo = new THREE.CylinderGeometry(0.3, 0.45, 4.5, 6);
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8d7a6b, roughness: 0.9, flatShading: true });
-        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 2.25;
+        // Realistic Tropical Broadleaf Tree with forked organic hardwood trunk & layered botanical bough crowns
+        const barkMat = new THREE.MeshStandardMaterial({ color: 0x6b5846, roughness: 0.92 });
+        const canopyDarkMat = new THREE.MeshStandardMaterial({ color: 0x2a6928, roughness: 0.76 });
+        const canopySunMat  = new THREE.MeshStandardMaterial({ color: 0x3f8832, roughness: 0.74 });
 
-        const pineGeo = new THREE.ConeGeometry(2.8, 7.5, 7);
-        const pineMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.85, flatShading: true });
-        const pine = new THREE.Mesh(pineGeo, pineMat);
-        pine.position.y = 6.0;
-        group.add(trunk, pine);
+        const trunkCurve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(0, -0.15, 0),
+            new THREE.Vector3(0.18, 1.6, -0.10),
+            new THREE.Vector3(-0.08, 3.2, 0.12),
+            new THREE.Vector3(0.05, 4.4, 0.02)
+        ]);
+        group.add(new THREE.Mesh(new THREE.TubeGeometry(trunkCurve, 8, 0.28, 7, false), barkMat));
+
+        for (let b = 0; b < 4; b++) {
+            const ang = (b / 4) * Math.PI * 2 + 0.35;
+            const reach = 2.0 + (b % 2) * 0.45;
+            const endY = 5.6 + (b % 2) * 0.55;
+            const limbCurve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(0.05, 3.6, 0.02),
+                new THREE.Vector3(Math.cos(ang) * reach * 0.55, 4.8, Math.sin(ang) * reach * 0.55),
+                new THREE.Vector3(Math.cos(ang) * reach, endY, Math.sin(ang) * reach)
+            ]);
+            group.add(new THREE.Mesh(new THREE.TubeGeometry(limbCurve, 6, 0.13, 6, false), barkMat));
+
+            for (let k = 0; k < 5; k++) {
+                const subA = ang + (k - 2) * 0.45;
+                const subR = 0.65 + (k % 2) * 0.45;
+                const leafCluster = new THREE.Mesh(
+                    new THREE.IcosahedronGeometry(0.95 + (k % 2) * 0.22, 1),
+                    (k % 2 === 0) ? canopySunMat : canopyDarkMat
+                );
+                leafCluster.scale.set(1.35, 0.62, 1.25);
+                leafCluster.position.set(
+                    Math.cos(ang) * reach + Math.cos(subA) * subR,
+                    endY + 0.25 + (k % 2) * 0.35,
+                    Math.sin(ang) * reach + Math.sin(subA) * subR
+                );
+                group.add(leafCluster);
+            }
+        }
+        const apexCrown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.55, 1), canopySunMat);
+        apexCrown.scale.set(1.45, 0.68, 1.45);
+        apexCrown.position.set(0.05, 6.75, 0.02);
+        group.add(apexCrown);
     } else if (type === "rock") {
         // Granite boulder
         const scale = 1.2 + Math.random() * 1.6;
@@ -1109,12 +1168,19 @@ function spawnFoliageItem(x, y, z, type, save = true) {
         rock.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
         group.add(rock);
     } else if (type === "bush") {
-        // Alpine flowering shrub
-        const bushGeo = new THREE.SphereGeometry(1.4, 7, 6);
-        const bushMat = new THREE.MeshStandardMaterial({ color: 0x55efc4, roughness: 0.85, flatShading: true });
-        const bush = new THREE.Mesh(bushGeo, bushMat);
-        bush.position.y = 1.0;
-        group.add(bush);
+        // Tropical fern & broadleaf shrub rosette
+        const shrubMatA = new THREE.MeshStandardMaterial({ color: 0x2e7830, roughness: 0.78, side: THREE.DoubleSide });
+        const shrubMatB = new THREE.MeshStandardMaterial({ color: 0x439436, roughness: 0.75, side: THREE.DoubleSide });
+        for (let f = 0; f < 8; f++) {
+            const ang = (f / 8) * Math.PI * 2;
+            const frond = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.55, 5), (f % 2 === 0) ? shrubMatB : shrubMatA);
+            frond.scale.set(1.0, 1.0, 0.22);
+            frond.position.set(Math.cos(ang) * 0.48, 0.58, Math.sin(ang) * 0.48);
+            frond.rotation.order = "YXZ";
+            frond.rotation.y = -ang + Math.PI * 0.5;
+            frond.rotation.x = 0.68;
+            group.add(frond);
+        }
     }
 
     group.position.set(x, y, z);
@@ -1333,11 +1399,27 @@ function animate() {
         }
     }
 
-    // 3. Adaptive Atmospheric Fog matching Planetary Biome
+    // 3. Adaptive Atmospheric Fog & Volumetric Boundary Mist of Plato's Atlantis
+    let baseAtmo = new THREE.Color(0x8ce3ff);
     if (terrain.getPlanetaryAtmosphereColor) {
-        const atmoColor = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
-        scene.fog.color.lerp(atmoColor, 0.08);
-        scene.background.lerp(atmoColor, 0.08);
+        baseAtmo = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
+    }
+    const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
+    let mistImmerse = 0.0;
+    if (camDistCenter > 615.0 && camDistCenter < 865.0 && camera.position.y < 290.0) {
+        const rBand = Math.sin(((camDistCenter - 615.0) / 250.0) * Math.PI);
+        const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 210.0) / 80.0));
+        mistImmerse = Math.max(0.0, rBand * hBand);
+    }
+    const targetFogCol = baseAtmo.clone().lerp(new THREE.Color(0xdcf0fa), mistImmerse * 0.90);
+    scene.fog.color.lerp(targetFogCol, 0.12);
+    scene.background.lerp(targetFogCol, 0.12);
+    scene.fog.near = THREE.MathUtils.lerp(460.0, 16.0, mistImmerse);
+    scene.fog.far  = THREE.MathUtils.lerp(1060.0, 155.0, mistImmerse);
+
+    if (atlantisMistUniforms) {
+        atlantisMistUniforms.uTime.value += delta;
+        atlantisMistUniforms.uCameraPos.value.copy(camera.position);
     }
 
     // 4. Continuous Tool Application while holding mouse
@@ -1421,10 +1503,121 @@ function animate() {
     }
 
     // 8. Stream voxel chunks around player/camera
-    terrain.updateChunksAroundPlayer(camera.position, 750);
+    terrain.updateChunksAroundPlayer(camera.position, 1000);
     terrain.update();
 
     renderer.render(scene, camera);
+}
+
+// ==========================================
+// VOLUMETRIC 360° BOUNDARY MIST RING AROUND PLATO'S ATLANTIS
+// ==========================================
+function createAtlantisMistRing(scene) {
+    atlantisMistGroup = new THREE.Group();
+    atlantisMistUniforms = {
+        uTime: { value: 0.0 },
+        uCameraPos: { value: new THREE.Vector3() }
+    };
+
+    const mistShaderMat = new THREE.ShaderMaterial({
+        uniforms: atlantisMistUniforms,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        vertexShader: `
+            uniform vec3 uCameraPos;
+            varying vec3 vWorldPos;
+            varying vec3 vWorldNormal;
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vWorldPos = wp.xyz;
+                vWorldNormal = normalize(mat3(modelMatrix) * normal);
+
+                float distH = length(wp.xz - uCameraPos.xz);
+                float planetR = 1800000.0;
+                if (distH < planetR) {
+                    wp.y -= (planetR - sqrt(planetR * planetR - distH * distH));
+                }
+                gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+        `,
+        fragmentShader: `
+            uniform float uTime;
+            uniform vec3 uCameraPos;
+            varying vec3 vWorldPos;
+            varying vec3 vWorldNormal;
+            varying vec2 vUv;
+
+            float mHash(vec2 p) {
+                p = fract(p * vec2(127.1, 311.7));
+                p += dot(p, p + 34.5);
+                return fract(p.x * p.y);
+            }
+            float mNoise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(
+                    mix(mHash(i), mHash(i + vec2(1.0, 0.0)), f.x),
+                    mix(mHash(i + vec2(0.0, 1.0)), mHash(i + vec2(1.0, 1.0)), f.x),
+                    f.y
+                );
+            }
+            float mFbm(vec2 p) {
+                float v = 0.0;
+                v += 0.50 * mNoise(p); p *= 2.03;
+                v += 0.25 * mNoise(p); p *= 2.02;
+                v += 0.125 * mNoise(p); p *= 2.04;
+                v += 0.0625 * mNoise(p);
+                return v;
+            }
+
+            void main() {
+                float theta = atan(vWorldPos.z, vWorldPos.x);
+                float hRel = vWorldPos.y - 120.0;
+                if (hRel < -2.0) discard;
+
+                vec2 cloudCoord = vec2(theta * 14.0 + uTime * 0.055, hRel * 0.022 - uTime * 0.03);
+                float billow = mFbm(cloudCoord);
+                float fineWisp = mFbm(cloudCoord * 2.7 - vec2(uTime * 0.08, 0.0));
+
+                float dynamicTop = 85.0 + billow * 72.0 + fineWisp * 24.0;
+                float bottomFade = smoothstep(-1.0, 12.0, hRel);
+                float topFade = 1.0 - smoothstep(dynamicTop * 0.52, dynamicTop, hRel);
+
+                float camDist = length(vWorldPos - uCameraPos);
+                float nearDissolve = smoothstep(10.0, 52.0, camDist);
+                float farFade = 1.0 - smoothstep(1900.0, 2750.0, camDist);
+
+                vec3 viewDir = normalize(uCameraPos - vWorldPos);
+                float facing = 0.35 + 0.65 * abs(dot(normalize(vWorldNormal), viewDir));
+
+                float density = bottomFade * topFade * (0.42 + 0.58 * billow) * facing * nearDissolve * farFade;
+                if (density < 0.008) discard;
+
+                vec3 baseMistCol = vec3(0.74, 0.89, 0.97);
+                vec3 sunTopCol   = vec3(0.95, 0.98, 1.00);
+                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 95.0 + billow * 0.25, 0.0, 1.0));
+
+                gl_FragColor = vec4(col, clamp(density * 0.46, 0.0, 0.78));
+            }
+        `
+    });
+
+    const shellRadii = [655, 700, 750, 805];
+    const shellHeight = 165;
+    for (let i = 0; i < shellRadii.length; i++) {
+        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 96, 8, true);
+        const cylMesh = new THREE.Mesh(cylGeo, mistShaderMat);
+        cylMesh.position.set(0, 118.0 + shellHeight * 0.5, 0);
+        cylMesh.rotation.y = i * 0.65;
+        cylMesh.frustumCulled = false;
+        atlantisMistGroup.add(cylMesh);
+    }
+
+    scene.add(atlantisMistGroup);
 }
 
 // Start Level Builder

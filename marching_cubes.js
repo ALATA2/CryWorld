@@ -762,6 +762,14 @@ export class VoxelTerrain {
                      float isTropicalOrForest = smoothstep(0.05, 0.25, diffuseColor.g - diffuseColor.r * 0.65);
                      vec3 detailedBase = mix(diffuseColor.rgb * (0.82 + 0.35 * nMed), vegCol, isTropicalOrForest * 0.85);
                      diffuseColor.rgb = mix(detailedBase, rockCol, rockMask);
+                 }
+
+                 // Subtle mystical sea-mist veil along the outer boundary ring of Plato's Atlantis (r = 630m .. 835m)
+                 float rAtlantis = length(vMCWorldPos.xz);
+                 float mistBand = smoothstep(615.0, 685.0, rAtlantis) * (1.0 - smoothstep(785.0, 855.0, rAtlantis));
+                 if (mistBand > 0.001 && wy > 119.5) {
+                     float mistHeightFade = 1.0 - smoothstep(165.0, 240.0, wy);
+                     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.76, 0.89, 0.96), mistBand * mistHeightFade * 0.72);
                  }`
             );
 
@@ -866,21 +874,57 @@ export class VoxelTerrain {
         _tempBiomeInfo.isMountain = false;
         _tempBiomeInfo.isStartingEast = false;
 
-        // Protected starting archipelago
+        // Protected circular Platonic Atlantis archipelago (Central Sacred Mountain + 3 Water Rings + 3 Land Rings + Grand Canal + Perimeter Mist)
         const distFromCenter = Math.sqrt(vx * vx + vz * vz);
-        const dxEast = vx - 220.0;
-        const dzEast = vz - 20.0;
-        const distFromEastArchi = Math.sqrt(dxEast * dxEast * 0.7 + dzEast * dzEast * 0.4);
 
-        if (distFromCenter < 180.0) {
+        if (distFromCenter < 282.0) {
+            if (distFromCenter >= 208.0) {
+                _tempBiomeInfo.type = 'atlantis_mist';
+                _tempBiomeInfo.name = '🌫️ NEBBIA DI CONFINE D\'ATLANTIDE';
+                return _tempBiomeInfo;
+            }
+            if (vz < -35.0 && vz > -206.0 && Math.abs(vx) < 13.5) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '⛵ GRANDE CANALE PRINCIPALE';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 26.0 && wy > 142.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '⛰️ MONTE SACRO D\'ATLANTIDE';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 39.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🏛️ ISOLA CENTRALE DEL MONTE SACRO';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 60.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '⚓ PORTO INTERNO (1° ANELLO D\'ACQUA)';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 86.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🏝️ 1° ANELLO DI TERRA';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 108.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🌊 2° ANELLO D\'ACQUA';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 138.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🌴 2° ANELLO DI TERRA';
+                return _tempBiomeInfo;
+            }
+            if (distFromCenter < 162.0) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🌊 3° ANELLO D\'ACQUA';
+                return _tempBiomeInfo;
+            }
             _tempBiomeInfo.type = 'lagoon_atoll';
-            _tempBiomeInfo.name = '🏝️ ATOLLO E LAGUNA TROPICALE';
-            return _tempBiomeInfo;
-        }
-        if (distFromEastArchi < 240.0) {
-            _tempBiomeInfo.type = 'starting_east';
-            _tempBiomeInfo.name = '🏜️ ARCIPELAGO ORIENTALE';
-            _tempBiomeInfo.isStartingEast = true;
+            _tempBiomeInfo.name = '🏖️ 3° ANELLO DI TERRA (CINTA ESTERNA)';
             return _tempBiomeInfo;
         }
 
@@ -1045,20 +1089,15 @@ export class VoxelTerrain {
     }
 
     getGlobalProceduralLand(x, z) {
-        // Exclude the starting archipelago zone to keep the initial islands pristine
+        // Keep Plato's Concentric Atlantis & its surrounding Ring of Mist (r < 275 voxels = 825m) completely pristine
         const distFromCenter = Math.sqrt(x * x + z * z);
-        const dxEast = x - 220.0;
-        const dzEast = z - 20.0;
-        const distFromEastArchi = Math.sqrt(dxEast * dxEast * 0.7 + dzEast * dzEast * 0.4);
-        
-        // Inside the starting archipelago protected zone
-        if (distFromCenter < 180.0 || distFromEastArchi < 240.0) {
+
+        if (distFromCenter < 275.0) {
             return { weight: 0.0, hill: 0.0 };
         }
-        
-        // Smooth transition mask between starting archipelago and infinite ocean
-        const transitionDist = Math.min(distFromCenter - 180.0, distFromEastArchi - 240.0);
-        const startAreaMask = Math.min(Math.max(transitionDist / 50.0, 0.0), 1.0);
+
+        // Smooth ocean transition right outside the Ring of Mist (825m .. 975m)
+        const startAreaMask = Math.min(Math.max((distFromCenter - 275.0) / 50.0, 0.0), 1.0);
         if (startAreaMask <= 0.0) {
             return { weight: 0.0, hill: 0.0 };
         }
@@ -1214,111 +1253,155 @@ export class VoxelTerrain {
         };
     }
 
+    // =========================================================
+    // PLATO'S CONCENTRIC ATLANTIS GENERATOR (Sacred Mountain + 3 Water Rings + 3 Land Rings + Grand Canal)
+    // =========================================================
+    getAtlantisArchipelago(x, z) {
+        const r = Math.sqrt(x * x + z * z);
+        if (r > 236.0) {
+            return { weight: 0.0, hill: 0.0 };
+        }
+
+        // Subtle organic shoreline ripples (attenuated near center so Sacred Mountain stays symmetrically centered)
+        const centerCalm = Math.min(1.0, r / 28.0);
+        const shoreRipple = (this.noise.noise2d(x * 0.042, z * 0.042) * 2.1 + this.noise.noise2d(x * 0.11, z * 0.11) * 0.75) * centerCalm;
+        const rOrg = Math.max(0.0, r + shoreRipple);
+
+        let weight = 0.0;
+        let hill = 0.0;
+
+        // 0. CENTRAL SACRED ISLAND & IL MONTE SACRO (dry shore r = 0 .. 38 vox = 0 .. 114m)
+        if (rOrg < 58.0) {
+            const p0 = Math.cos(Math.min(1.0, rOrg / 58.0) * Math.PI * 0.5);
+            weight = Math.max(weight, Math.pow(p0, 0.62));
+            // Fertile coastal terrace around the foot of the Sacred Mountain
+            let centralHill = 11.5 * Math.pow(p0, 0.82);
+
+            // Majestic Sacred Mountain rising at (0, 0) up to ~208m (+88m above sea level) with 5 rocky radial spurs
+            if (r < 29.0) {
+                const theta = Math.atan2(z, x);
+                const tMount = Math.max(0.0, 1.0 - r / 29.0);
+                const spurWave = 0.5 + 0.5 * Math.cos(theta * 5.0 + r * 0.11);
+                const ridgeDetail = this.noise.noise2d(x * 0.075, z * 0.075) * 2.4;
+                let sacredRise = Math.pow(tMount, 1.48) * 25.5
+                               + Math.pow(tMount, 1.15) * (1.0 - tMount) * spurWave * 11.5
+                               + ridgeDetail * tMount;
+                // Walkable sacred summit sanctuary plateau at the very apex (r < 3.4 voxels = 10m)
+                if (r < 3.4) {
+                    const flatT = 1.0 - r / 3.4;
+                    sacredRise -= flatT * 1.8;
+                }
+                centralHill += Math.max(0.0, sacredRise);
+            }
+            hill = Math.max(hill, centralHill);
+        }
+
+        // Helper for each concentric Land Ring (separated by deep navigable Water Rings!)
+        // 1st Water Ring (Inner Harbor): r ≈ 38 .. 60 vox (114m .. 180m)
+        // 1st Land Ring: dry shore r ≈ 60 .. 86 vox (180m .. 258m), R_mid = 73, W_half = 22
+        const d1 = Math.abs(rOrg - 73.0) / 22.0;
+        if (d1 < 1.0) {
+            const p1 = Math.cos(d1 * Math.PI * 0.5);
+            const ridge1 = Math.max(-1.2, this.noise.noise2d(x * 0.045, z * 0.045) * 2.6);
+            weight = Math.max(weight, Math.pow(p1, 0.64));
+            hill = Math.max(hill, (12.6 + ridge1) * Math.pow(p1, 0.85));
+        }
+
+        // 2nd Water Ring: r ≈ 86 .. 108 vox (258m .. 324m)
+        // 2nd Land Ring: dry shore r ≈ 108 .. 138 vox (324m .. 414m), R_mid = 123, W_half = 25
+        const d2 = Math.abs(rOrg - 123.0) / 25.0;
+        if (d2 < 1.0) {
+            const p2 = Math.cos(d2 * Math.PI * 0.5);
+            const ridge2 = Math.max(-1.5, this.noise.noise2d(x * 0.038, z * 0.038) * 3.4);
+            weight = Math.max(weight, Math.pow(p2, 0.64));
+            hill = Math.max(hill, (14.6 + ridge2) * Math.pow(p2, 0.85));
+        }
+
+        // 3rd Water Ring: r ≈ 138 .. 162 vox (414m .. 486m)
+        // 3rd Land Ring (Outer Belt): dry shore r ≈ 162 .. 196 vox (486m .. 588m), R_mid = 179, W_half = 28
+        const d3 = Math.abs(rOrg - 179.0) / 28.0;
+        if (d3 < 1.0) {
+            const p3 = Math.cos(d3 * Math.PI * 0.5);
+            const crag3 = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(x * 0.028, z * 0.028))) * 4.5;
+            const ridge3 = Math.max(-1.5, this.noise.noise2d(x * 0.04, z * 0.04) * 3.0);
+            weight = Math.max(weight, Math.pow(p3, 0.64));
+            hill = Math.max(hill, (16.2 + ridge3 + crag3 * p3) * Math.pow(p3, 0.82));
+        }
+
+        // Circular crown of 10 small sentinel sea-stacks/islets just outside the 3rd Land Ring (r ≈ 206 vox = 618m),
+        // leaving the Grand Canal gateway (-Z) wide open!
+        if (r > 194.0 && r < 222.0 && z > -188.0) {
+            const numIslets = 10;
+            for (let k = 0; k < numIslets; k++) {
+                const ang = -Math.PI * 0.36 + (k / (numIslets - 1)) * (Math.PI * 1.72); // Skips -PI/2 (-Z canal mouth)
+                // Rotate standard angle so -PI/2 is at (0, -206) -> sin(ang) on Z, cos(ang) on X shifted by +PI/2
+                const thetaI = -Math.PI * 0.5 + 0.42 + (k / (numIslets - 1)) * (Math.PI * 2.0 - 0.84);
+                const ix = Math.cos(thetaI) * 207.0;
+                const iz = Math.sin(thetaI) * 207.0;
+                const dIslet = Math.sqrt((x - ix) * (x - ix) + (z - iz) * (z - iz)) + shoreRipple * 0.7;
+                if (dIslet < 11.5) {
+                    const pI = Math.cos((dIslet / 11.5) * Math.PI * 0.5);
+                    weight = Math.max(weight, Math.pow(pI, 0.60));
+                    hill = Math.max(hill, 13.5 * Math.pow(pI, 0.90));
+                }
+            }
+        }
+
+        // IL CANALE PRINCIPALE: Straight monumental waterway along -Z connecting the Inner Harbor (z = -48)
+        // directly through all 3 Land Rings out to the Open Sea (z = -212)!
+        if (z < -36.0 && z > -218.0) {
+            // Smooth entry inside the 1st Water Ring (-36 .. -52) and flared Harbor Mouth at the Open Sea (-182 .. -212)
+            const zEntryFade = Math.min(1.0, Math.max(0.0, (-36.0 - z) / 14.0));
+            const mouthFlare = Math.max(0.0, (-z - 178.0) / 34.0);
+            const canalHalfWater = 9.0 + mouthFlare * 6.5; // 54m navigable channel widening to 93m at sea entrance!
+            const canalTransition = 6.5; // Smooth golden beach & sculpted stone bank transition
+            const absX = Math.abs(x + this.noise.noise2d(x * 0.06, z * 0.06) * 0.85);
+
+            if (absX < canalHalfWater + canalTransition) {
+                let carve = 0.0;
+                if (absX <= canalHalfWater) {
+                    carve = 1.0;
+                } else {
+                    const tBank = (absX - canalHalfWater) / canalTransition;
+                    carve = 0.5 + 0.5 * Math.cos(tBank * Math.PI);
+                }
+                carve *= zEntryFade;
+                // Carve deep navigable seabed (weight -> 0.12 gives ~16m crystal sapphire water depth)
+                weight = weight * (1.0 - carve) + 0.10 * carve * (1.0 - mouthFlare * 0.5);
+                hill = hill * (1.0 - carve);
+            } else if (absX < canalHalfWater + canalTransition + 6.0 && weight > 0.65) {
+                // Subtle monumental headland elevation framing the Grand Canal gates on each Land Ring
+                const tGate = 1.0 - Math.abs(absX - (canalHalfWater + canalTransition + 3.0)) / 3.0;
+                hill += Math.max(0.0, tGate) * 3.2 * zEntryFade;
+            }
+        }
+
+        // Keep gentle turquoise reef bathymetry in the 3 concentric Water Rings (~13m - 18m navigable depth)
+        if (r < 196.0 && weight < 0.14) {
+            const innerBasinMask = 1.0 - Math.max(0.0, (r - 178.0) / 18.0);
+            weight = Math.max(weight, 0.12 * innerBasinMask);
+        }
+
+        return { weight, hill };
+    }
+
     getBaseDensity(x, y, z) {
-        // Center of the world is (0, 0) in voxel space
-        const distFromCenter = Math.sqrt(x * x + z * z);
-        
-        // 1. Circular atoll ring at radius 38 voxels (114 meters) with a thickness/span of 22 voxels (66 meters)
-        const distFromAtoll = Math.abs(distFromCenter - 38.0);
-        const atollWeightRaw = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
-        
-        // Keep a minimum land weight of 0.35 inside the lagoon (dist < 38)
-        let atollWeight = atollWeightRaw;
-        if (distFromCenter < 38.0) {
-            atollWeight = Math.max(0.35, atollWeightRaw);
-        }
-        
-        // 2. Volcano island centered at (0, 95) with a radius of 42 voxels (126 meters)
-        // Stretched towards the south (dz < 0) to make a long flat tongue of land that enters the water smoothly
-        const dx = x;
-        let dz = z - 95.0;
-        if (dz < 0.0) {
-            dz = dz * 0.5; // Stretch by 2x along Z
-        }
-        
-        const distToVolcanoRaw = Math.sqrt(dx * dx + dz * dz);
-        // Add 2D Perlin noise to make the shoreline irregular
-        const shoreNoise = this.noise.noise2d(x * 0.08, z * 0.08) * 5.0;
-        const distToVolcano = distToVolcanoRaw + shoreNoise;
-        
-        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
-        
-        // 3. Four-times enlarged Great Rocky Archipelago (X > 80 voxels, > 240 meters from center)
-        // Spaced out to ensure a wide open sea channel (150m+ gap) between atoll and archipelago
-        const eastShoreNoise = (this.noise.noise2d(x * 0.015, z * 0.015) * 16.0) + (this.noise.noise2d(x * 0.04, z * 0.04) * 6.0);
-        
-        // Island A (North-East): Center (250, 240), Radius 120 voxels (~720m diameter)
-        const dxA = (x - 250.0) * 1.15;
-        const dzA = (z - 240.0) * 0.85;
-        const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
-        const weightA = Math.max(0.0, 1.0 - distA / 120.0);
-        
-        // Island B (Center-East): Center (220, 20), Radius 100 voxels (~600m diameter)
-        const dxB = (x - 220.0) * 1.1;
-        const dzB = (z - 20.0) * 0.95;
-        const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
-        const weightB = Math.max(0.0, 1.0 - distB / 100.0);
-        
-        // Island C (South-East / Grand Island): Center (260, -220), Radius 150 voxels (~900m diameter, 1.5km long)
-        const dxC = (x - 260.0) * 1.15;
-        const dzC = (z - (-220.0)) * 0.70;
-        const distC = Math.sqrt(dxC * dxC + dzC * dzC) + eastShoreNoise;
-        const weightC = Math.max(0.0, 1.0 - distC / 150.0);
-        
-        // Combine the three giant eastern islands
-        const eastIslandWeight = Math.max(weightA, weightB, weightC);
-        
-        // 4. Global procedural infinite island generator beyond the starting archipelago
+        // 1. Plato's Concentric Atlantis (Sacred Mountain + 3 Water Rings + 3 Land Rings + Grand Canal)
+        const atlantis = this.getAtlantisArchipelago(x, z);
+
+        // 2. Global procedural infinite planet beyond the Ring of Mist
         const globalLand = this.getGlobalProceduralLand(x, z);
 
-        // Combine land weights of atoll, volcano, eastern islands and infinite global islands
-        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
-        
-        // Smooth falloffs
+        const landWeight = Math.max(atlantis.weight, globalLand.weight);
+        const hillHeight = Math.max(atlantis.hill, globalLand.hill);
+
         const smoothWeightAbove = Math.pow(Math.max(0.0, Math.min(1.0, landWeight)), 1.2);
         const smoothWeightBelow = Math.pow(Math.max(0.0, Math.min(1.0, landWeight * 1.5)), 1.2);
-        
-        // Base terrain height factor using Perlin Noise fBm
-        const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.5;
-        const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 1.0;
-        const baseHeightRaw = 4.0 + n1 + n2;
-        
-        // Calculate hill heights
-        let hillHeight = 0;
-        
-        // Atoll hill height with scenic rocky crags and low sandy motu passes
-        if (distFromAtoll < 22.0) {
-            const t = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
-            const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(x * 0.038, z * 0.038) * 3.8);
-            hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
-        }
-        
-        // Volcano hill height with a central crater bowl (lower and flatter)
-        if (distToVolcano < 42.0) {
-            const t = Math.max(0.0, 1.0 - distToVolcano / 42.0);
-            let vHill = 10.5 * Math.pow(t, 1.25);
-            
-            // Subtract a bowl for the crater at the very center of the volcano island (distance < 10 voxels)
-            if (distToVolcano < 10.0) {
-                const craterT = Math.max(0.0, 1.0 - Math.max(0.0, distToVolcano) / 10.0);
-                vHill -= 4.5 * Math.pow(craterT, 1.5); // Crater depression
-            }
-            hillHeight = Math.max(hillHeight, vHill);
-        }
-        
-        // Eastern islands hill height (dramatic tropical volcanic ridges and peaks like Image 2)
-        if (x > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(Math.max(0.0, eastIslandWeight), 1.25);
-            const ridge = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(x * 0.018, z * 0.018)));
-            const hillNoise = this.noise.noise2d(x * 0.03, z * 0.03) * 3.0;
-            const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
-            hillHeight = Math.max(hillHeight, eHill);
-        }
 
-        // Global procedural islands hill height
-        if (globalLand.hill > 0.0) {
-            hillHeight = Math.max(hillHeight, globalLand.hill);
-        }
+        // Base terrain height factor using Perlin Noise fBm
+        const n1 = this.noise.noise2d(x * 0.03, z * 0.03) * 3.2;
+        const n2 = this.noise.noise2d(x * 0.10, z * 0.10) * 0.9;
+        const baseHeightRaw = 4.0 + n1 + n2;
         
         let density = 0;
         if (y >= 40) {
@@ -1769,79 +1852,19 @@ export class VoxelTerrain {
     }
 
     getEstimatedSurfaceHeight(vx, vz) {
-        const distFromCenter = Math.sqrt(vx * vx + vz * vz);
-        
-        // 1. Atoll ring at 38 voxels
-        const distFromAtoll = Math.abs(distFromCenter - 38.0);
-        const atollWeightRaw = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
-        let atollWeight = atollWeightRaw;
-        if (distFromCenter < 38.0) {
-            atollWeight = Math.max(0.35, atollWeightRaw);
-        }
-        
-        // 2. Volcano island at (0, 95)
-        const dx = vx;
-        let dz = vz - 95.0;
-        if (dz < 0.0) dz = dz * 0.5;
-        const distToVolcanoRaw = Math.sqrt(dx * dx + dz * dz);
-        const shoreNoise = this.noise.noise2d(vx * 0.08, vz * 0.08) * 5.0;
-        const distToVolcano = distToVolcanoRaw + shoreNoise;
-        const volcanoWeight = Math.max(0.0, 1.0 - distToVolcano / 42.0);
-
-        // 3. Great Rocky Archipelago
-        const eastShoreNoise = (this.noise.noise2d(vx * 0.015, vz * 0.015) * 16.0) + (this.noise.noise2d(vx * 0.04, vz * 0.04) * 6.0);
-        const dxA = (vx - 250.0) * 1.15;
-        const dzA = (vz - 240.0) * 0.85;
-        const distA = Math.sqrt(dxA * dxA + dzA * dzA) + eastShoreNoise;
-        const weightA = Math.max(0.0, 1.0 - distA / 120.0);
-        
-        const dxB = (vx - 220.0) * 1.1;
-        const dzB = (vz - 20.0) * 0.95;
-        const distB = Math.sqrt(dxB * dxB + dzB * dzB) + eastShoreNoise;
-        const weightB = Math.max(0.0, 1.0 - distB / 100.0);
-        
-        const dxC = (vx - 260.0) * 1.15;
-        const dzC = (vz - (-220.0)) * 0.70;
-        const distC = Math.sqrt(dxC * dxC + dzC * dzC) + eastShoreNoise;
-        const weightC = Math.max(0.0, 1.0 - distC / 150.0);
-        
-        const eastIslandWeight = Math.max(weightA, weightB, weightC);
+        const atlantis = this.getAtlantisArchipelago(vx, vz);
         const globalLand = this.getGlobalProceduralLand(vx, vz);
-        const landWeight = Math.max(atollWeight, volcanoWeight, eastIslandWeight, globalLand.weight);
-        
+
+        const landWeight = Math.max(atlantis.weight, globalLand.weight);
+        const hillHeight = Math.max(atlantis.hill, globalLand.hill);
+
         const smoothWeightAbove = Math.pow(Math.max(0.0, Math.min(1.0, landWeight)), 1.2);
         const smoothWeightBelow = Math.pow(Math.max(0.0, Math.min(1.0, landWeight * 1.5)), 1.2);
-        
-        const n1 = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.5;
-        const n2 = this.noise.noise2d(vx * 0.10, vz * 0.10) * 1.0;
+
+        const n1 = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.2;
+        const n2 = this.noise.noise2d(vx * 0.10, vz * 0.10) * 0.9;
         const baseHeightRaw = 4.0 + n1 + n2;
-        
-        let hillHeight = 0;
-        if (distFromAtoll < 22.0) {
-            const t = Math.max(0.0, 1.0 - distFromAtoll / 22.0);
-            const atollPeakNoise = Math.max(-1.5, this.noise.noise2d(vx * 0.038, vz * 0.038) * 3.8);
-            hillHeight = Math.max(hillHeight, (11.5 + atollPeakNoise) * Math.pow(t, 1.25));
-        }
-        if (distToVolcano < 42.0) {
-            const t = Math.max(0.0, 1.0 - distToVolcano / 42.0);
-            let vHill = 10.5 * Math.pow(t, 1.25);
-            if (distToVolcano < 10.0) {
-                const craterT = Math.max(0.0, 1.0 - Math.max(0.0, distToVolcano) / 10.0);
-                vHill -= 4.5 * Math.pow(craterT, 1.5);
-            }
-            hillHeight = Math.max(hillHeight, vHill);
-        }
-        if (vx > 80.0 && eastIslandWeight > 0.0) {
-            const t = Math.pow(Math.max(0.0, eastIslandWeight), 1.25);
-            const ridge = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(vx * 0.018, vz * 0.018)));
-            const hillNoise = this.noise.noise2d(vx * 0.03, vz * 0.03) * 3.0;
-            const eHill = Math.max(0.0, t * 14.0 + Math.pow(ridge, 1.5) * t * 8.5 + hillNoise);
-            hillHeight = Math.max(hillHeight, eHill);
-        }
-        if (globalLand.hill > 0.0) {
-            hillHeight = Math.max(hillHeight, globalLand.hill);
-        }
-        
+
         const h0 = Math.max(0.0, baseHeightRaw + hillHeight);
         const yAbove = 32.0 + h0 * smoothWeightAbove;
         if (yAbove >= 40.0) {
