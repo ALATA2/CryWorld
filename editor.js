@@ -352,20 +352,20 @@ function init() {
              vec3 viewDir = normalize(eye - worldPosition.xyz);
              float NdotV  = clamp(dot(surfaceNormal, viewDir), 0.0, 1.0);
              float waveRipple = 0.84 + 0.42 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
-             float physFresnel = 0.035 + 0.46 * pow(1.0 - NdotV, 4.2);
+             float physFresnel = 0.030 + 0.35 * pow(1.0 - NdotV, 4.5);
 
-             vec3 ultraShallowTurq = vec3(0.015, 0.58, 0.64);
-             vec3 midLagoonCyan    = vec3(0.012, 0.28, 0.48);
+             vec3 ultraShallowTurq = vec3(0.018, 0.62, 0.68);
+             vec3 midLagoonCyan    = vec3(0.012, 0.30, 0.50);
              vec3 deepRoyalCobalt  = vec3(0.008, 0.072, 0.235);
 
-             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(0.9, 4.2, waterDepth));
-             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(3.8, 10.5, waterDepth));
+             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(1.2, 4.8, waterDepth));
+             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(4.2, 11.0, waterDepth));
 
              float reefMacro  = wFbm(worldPosition.xz * 0.048);
              float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
              float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
                               * smoothstep(0.55, 1.75, waterDepth)
-                              * (1.0 - smoothstep(4.8, 8.2, waterDepth));
+                              * (1.0 - smoothstep(5.0, 8.8, waterDepth));
              vec3 darkCoralReef = mix(vec3(0.008, 0.052, 0.082), vec3(0.018, 0.115, 0.135), reefDetail);
              waterBody = mix(waterBody, darkCoralReef, reefPatch * 0.82);
 
@@ -373,7 +373,7 @@ function init() {
 
              vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.5 + pow(NdotH, 32.0) * 0.34);
+             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 260.0) * 2.4 + pow(NdotH, 72.0) * 0.20);
 
              float foamNoise = wFbm(worldPosition.xz * 0.62 + vec2(time * 0.48, -time * 0.34));
              float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);

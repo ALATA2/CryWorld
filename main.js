@@ -478,31 +478,31 @@ function init() {
              float waveRipple = 0.84 + 0.42 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
 
              // Physical Schlick Fresnel (prevents washed-out sky mirror over shallow turquoise coral reefs)
-             float physFresnel = 0.035 + 0.46 * pow(1.0 - NdotV, 4.2);
+             float physFresnel = 0.030 + 0.35 * pow(1.0 - NdotV, 4.5);
 
-             vec3 ultraShallowTurq = vec3(0.015, 0.58, 0.64);
-             vec3 midLagoonCyan    = vec3(0.012, 0.28, 0.48);
+             vec3 ultraShallowTurq = vec3(0.018, 0.62, 0.68);
+             vec3 midLagoonCyan    = vec3(0.012, 0.30, 0.50);
              vec3 deepRoyalCobalt  = vec3(0.008, 0.072, 0.235);
 
-             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(0.9, 4.2, waterDepth));
-             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(3.8, 10.5, waterDepth));
+             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(1.2, 4.8, waterDepth));
+             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(4.2, 11.0, waterDepth));
 
-             // Procedural Living Coral Reef Heads & Mottled Reef Shadows (0.55m .. 8.2m depth)
+             // Procedural Living Coral Reef Heads & Mottled Reef Shadows (0.55m .. 8.5m depth)
              float reefMacro  = wFbm(worldPosition.xz * 0.048);
              float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
              float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
                               * smoothstep(0.55, 1.75, waterDepth)
-                              * (1.0 - smoothstep(4.8, 8.2, waterDepth));
+                              * (1.0 - smoothstep(5.0, 8.8, waterDepth));
              vec3 darkCoralReef = mix(vec3(0.008, 0.052, 0.082), vec3(0.018, 0.115, 0.135), reefDetail);
              waterBody = mix(waterBody, darkCoralReef, reefPatch * 0.82);
 
              finalColor = mix(waterBody * waveRipple, outgoingLight, physFresnel);
 
-             // 3. Warm Golden Sunlight Shimmer Path across the waves
+             // 3. Warm Golden Sunlight Shimmer Path across the waves (focused glints without bleaching lagoon color)
              vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             float sunGlintCore = pow(NdotH, 240.0) * 2.5;
-             float sunGlintPath = pow(NdotH, 32.0) * 0.34;
+             float sunGlintCore = pow(NdotH, 260.0) * 2.4;
+             float sunGlintPath = pow(NdotH, 72.0) * 0.20;
              finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
 
              // 4. Crisp White Shoreline Swash Lace (0.04m..0.62m) + Reef-Crest Breaker Wisps (0.8m..2.4m) — Zero Milky Patina!
@@ -2347,10 +2347,10 @@ function createAtlantisMistRing(scene) {
 // PROCEDURAL ENVIRONMENT GENERATION (PALM TREES, TROPICAL BUSHES & BOULDERS)
 // ==========================================
 function spawnEnvironmentObjects(scene, terrain) {
-    const palmTreesCount = 650;
-    const pineTreesCount = 540;
-    const rocksCount = 480;
-    const bushesCount = 920;
+    const palmTreesCount = 680;
+    const pineTreesCount = 640;
+    const rocksCount = 210;
+    const bushesCount = 960;
     
     // Procedural Coconut Palm Tree generator (seamless curved trunk & lush arching fronds)
     function createPalmTree() {
@@ -3534,21 +3534,20 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedBushes.instanceMatrix.needsUpdate = true;
     instancedBushes.matrixAutoUpdate = false;
 
-    // Spawning loop for Chiseled Coastal Headland & Crag Boulders (concentrated on rocky shores & high crags)
+    // Spawning loop for Natural Shoreline Boulders (concentrated along rocky coves, keeping green hills clean & lush!)
     attempts = 0;
     let rocksPlaced = 0;
-    while (rocksPlaced < rocksCount && attempts < 7500) {
+    while (rocksPlaced < rocksCount && attempts < 5500) {
         attempts++;
         const { wx, wz } = sampleAtlantisPoint(640.0);
-        const groundHeight = getFastGroundHeight(wx, wz, 118.8, 212.0);
-        const isShoreOrCrag = (groundHeight > 118.8 && groundHeight < 125.2) || (groundHeight > 136.0) || (Math.random() < 0.22);
+        const groundHeight = getFastGroundHeight(wx, wz, 119.0, 123.6);
 
-        if (groundHeight > 118.8 && groundHeight < 212.0 && isShoreOrCrag && isFarEnough(wx, wz, 3.4)) {
-            const y = groundHeight - 0.28;
-            const bigOutcrop = (groundHeight < 123.5 || groundHeight > 142.0) ? (1.05 + Math.random() * 1.15) : (0.75 + Math.random() * 0.75);
-            const scaleX = bigOutcrop * (0.85 + Math.random() * 0.45);
-            const scaleY = bigOutcrop * (0.55 + Math.random() * 0.55);
-            const scaleZ = bigOutcrop * (0.85 + Math.random() * 0.45);
+        if (groundHeight > 119.0 && groundHeight < 123.6 && isFarEnough(wx, wz, 5.2)) {
+            const y = groundHeight - 0.26;
+            const baseRockSc = 0.65 + Math.random() * 0.60;
+            const scaleX = baseRockSc * (0.85 + Math.random() * 0.35);
+            const scaleY = baseRockSc * (0.50 + Math.random() * 0.40);
+            const scaleZ = baseRockSc * (0.85 + Math.random() * 0.35);
             const rotX = Math.random() * Math.PI;
             const rotY = Math.random() * Math.PI;
             const rotZ = Math.random() * Math.PI;
