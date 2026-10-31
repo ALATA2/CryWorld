@@ -530,8 +530,8 @@ function init() {
     
     scene.add(water);
 
-    // 6. Marching Cubes Voxel Terrain Setup (Height 88 voxels = 264m for Sacred Mountain & Alpine Peaks)
-    terrain = new VoxelTerrain(scene, 256, 88, 256, 3.0);
+    // 6. Marching Cubes Voxel Terrain Setup (Height 96 voxels = 288m for Sacred Mountain & Alpine Peaks)
+    terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
 
     // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis
     createAtlantisMistRing(scene);
@@ -548,10 +548,7 @@ function init() {
     const startZ = 72;
     const testPos = new THREE.Vector3(startX, 220, startZ);
 
-    // Build initial chunks around start position so we can query height
-    terrain.updateChunksAroundPlayer(testPos, 1050);
-
-    // Auto-load custom map from Level Editor if saved in localStorage
+    // Auto-load custom map from Level Editor before initial chunk generation so custom terrain builds immediately
     try {
         const savedMap = localStorage.getItem('cryworld_custom_map');
         if (savedMap) {
@@ -562,6 +559,9 @@ function init() {
     } catch (e) {
         console.warn("Could not load custom map:", e);
     }
+
+    // Build initial chunks around start position immediately across the Central Island & 1st Ring
+    terrain.updateChunksAroundPlayer(testPos, 1050, 340);
 
     // Initialize 512x512 high-precision bathymetry depth texture (2304m x 2304m centered on Atlantis)
     heightmapData = new Uint8Array(512 * 512);
@@ -1812,7 +1812,7 @@ function animate() {
             
             if (distSq < minDist * minDist) {
                 const treeBottom = inst.y;
-                const treeHeight = 5.0;
+                const treeHeight = 6.2;
                 if (camera.position.y - playerHeight < treeBottom + treeHeight && camera.position.y > treeBottom) {
                     const dist = Math.sqrt(distSq);
                     const pushFactor = (minDist - dist) / (dist || 1);
@@ -3276,6 +3276,17 @@ function spawnEnvironmentObjects(scene, terrain) {
     
     instancedRocks.castShadow = true; instancedRocks.receiveShadow = true;
     instancedBushes.castShadow = true; instancedBushes.receiveShadow = true;
+
+    // Prevent premature frustum culling of archipelago instanced trees/rocks at screen edges
+    instancedPalmsTrunk.frustumCulled = false;
+    instancedPalmsLeaves.frustumCulled = false;
+    instancedPalmsCoconuts.frustumCulled = false;
+    instancedPinesTrunk.frustumCulled = false;
+    instancedPinesFoliage.frustumCulled = false;
+    instancedPinesBTrunk.frustumCulled = false;
+    instancedPinesBFoliage.frustumCulled = false;
+    instancedRocks.frustumCulled = false;
+    instancedBushes.frustumCulled = false;
 
     envGroup.add(instancedPalmsTrunk);
     envGroup.add(instancedPalmsLeaves);

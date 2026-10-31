@@ -606,11 +606,11 @@ export class VoxelTerrain {
         // Vertical voxel range:
         // Sea level is at y = 40 (world Y = 120.0m).
         // 512m deep ocean floor reaches world Y = 120.0 - 512.0 = -392.0m (voxel y = -131).
-        // Continental mountain summits reach up to world Y = 264.0m (voxel y = 88).
+        // Continental mountain summits reach up to world Y = 288.0m (voxel y = 96).
         this.minY = -131;
-        this.maxY = 88;
+        this.maxY = Math.max(96, height);
         this.minWorldY = this.minY * this.voxelScale; // -393.0m
-        this.maxWorldY = this.maxY * this.voxelScale; // 264.0m
+        this.maxWorldY = this.maxY * this.voxelScale; // 288.0m
         this.minChunkY = Math.floor(this.minY / this.chunkSize); // -9
         this.maxChunkY = Math.ceil(this.maxY / this.chunkSize);  // 6
         this.chunksY = this.maxChunkY - this.minChunkY;
@@ -798,7 +798,9 @@ export class VoxelTerrain {
         // Sparse map for modified voxels: key is "x,y,z"
         this.modifiedVoxels = new Map();
         this.modifiedColumns = new Set();
+        this.modifiedChunkSet = new Set();
         this.locallyModifiedChunks = new Set();
+        this.columnBoundsCache = new Map();
         
         // Group to hold all chunk meshes
         this.group = new THREE.Group();
@@ -850,6 +852,7 @@ export class VoxelTerrain {
             for (let cy = cy1; cy <= cy2; cy++) {
                 for (let cz = cz1; cz <= cz2; cz++) {
                     const chunkKey = `${cx},${cy},${cz}`;
+                    this.modifiedChunkSet.add(chunkKey);
                     if (this.loadedChunks.has(chunkKey)) {
                         const chunk = this.loadedChunks.get(chunkKey);
                         chunk.setLocalDensity(x, y, z, value);
@@ -1443,56 +1446,59 @@ export class VoxelTerrain {
         return this.getBaseDensity(vx, 40, vz) < 0.0;
     }
 
-    hasPotentialTerrain(cx, cy, cz) {
-        const startX = cx * this.chunkSize;
-        const endX = startX + this.chunkSize;
-        const startZ = cz * this.chunkSize;
-        const endZ = startZ + this.chunkSize;
+    getColumnSurfaceBounds(cx, cz) {
+        const colKey = `${cx},${cz}`;
+        let cached = this.columnBoundsCache.get(colKey);
+        if (cached !== undefined) {
+            return cached;
+        }
 
-        // Underground chunks below the natural seabed (cy < 0, y <= 0) are 100% solid bedrock
-        // and produce 0 triangles unless a player has dug into this column!
-        if (cy < 0) {
-            if (this.modifiedColumns.size > 0) {
-                for (let x = startX; x <= endX; x += 2) {
-                    for (let z = startZ; z <= endZ; z += 2) {
-                        if (this.modifiedColumns.has(`${x},${z}`)) return true;
-                    }
-                }
+        const startX = cx * this.chunkSize;
+        const startZ = cz * this.chunkSize;
+        let minH = Infinity;
+        let maxH = -Infinity;
+
+        // Dense 5x5 grid across the 16x16 chunk footprint (all corners, edges & interior every 4 voxels = 12m)
+        for (let ix = 0; ix <= this.chunkSize; ix += 4) {
+            const vx = startX + ix;
+            for (let iz = 0; iz <= this.chunkSize; iz += 4) {
+                const h = this.getEstimatedSurfaceHeight(vx, startZ + iz);
+                if (h < minH) minH = h;
+                if (h > maxH) maxH = h;
             }
+        }
+
+        if (this.columnBoundsCache.size > 16384) {
+            this.columnBoundsCache.clear();
+        }
+        cached = { minH, maxH };
+        this.columnBoundsCache.set(colKey, cached);
+        return cached;
+    }
+
+    hasPotentialTerrain(cx, cy, cz) {
+        // 1. Always include any chunk touched by player digging/building or Level Editor modifications
+        if (this.modifiedChunkSet.has(`${cx},${cy},${cz}`)) {
+            return true;
+        }
+
+        // 2. Underground chunks below the natural seabed (cy < 0, y <= 0) are 100% solid bedrock
+        // and produce 0 triangles unless modified by digging
+        if (cy < 0) {
             return false;
         }
 
-        const midX = (startX + endX) * 0.5;
-        const midZ = (startZ + endZ) * 0.5;
-
-        // Sample at chunk bottom, middle and top Y
+        // 3. Exact 2D surface height envelope across the 16x16 column with a wide 12-voxel (36m) vertical safety margin
+        // Guarantees ZERO skipped chunks on steep mountains, hills, concentric rings, sea stacks, or seabed slopes!
+        const bounds = this.getColumnSurfaceBounds(cx, cz);
         const yBottom = cy * this.chunkSize;
         const yTop = yBottom + this.chunkSize;
-        const yMid = yBottom + this.chunkSize * 0.5;
 
-        const d0 = this.getBaseDensity(midX, yBottom, midZ);
-        const d1 = this.getBaseDensity(midX, yMid, midZ);
-        const d2 = this.getBaseDensity(startX, yBottom, startZ);
-        const d3 = this.getBaseDensity(endX, yBottom, startZ);
-        const d4 = this.getBaseDensity(startX, yBottom, endZ);
-        const d5 = this.getBaseDensity(endX, yBottom, endZ);
-        const d6 = this.getBaseDensity(midX, yTop, midZ);
+        const clampedMinH = Math.min(bounds.minH, this.maxY - 2.0);
+        const minSurface = Math.max(0.0, clampedMinH - 12.0);
+        const maxSurface = bounds.maxH + 12.0;
 
-        // If any sample is near or above the surface and not 100% buried solid
-        const hasSolid = (d0 > -0.92 || d1 > -0.92 || d2 > -0.92 || d3 > -0.92 || d4 > -0.92 || d5 > -0.92 || d6 > -0.92);
-        const hasAir   = (d0 < 1.5 || d1 < 1.5 || d2 < 1.5 || d3 < 1.5 || d4 < 1.5 || d5 < 1.5 || d6 < 1.5);
-        if (hasSolid && hasAir) return true;
-
-        // Check if any modified voxels exist in this chunk
-        if (this.modifiedColumns.size > 0) {
-            for (let x = startX; x <= endX; x += 2) {
-                for (let z = startZ; z <= endZ; z += 2) {
-                    if (this.modifiedColumns.has(`${x},${z}`)) return true;
-                }
-            }
-        }
-
-        return false;
+        return (yTop >= minSurface && yBottom <= maxSurface);
     }
 
     updateChunksAroundPlayer(playerPos, renderDistance = 750, immediateRadius = 180) {
@@ -1584,7 +1590,7 @@ export class VoxelTerrain {
 
         // Process queued chunks with high efficiency
         const startTime = performance.now();
-        const maxBuilds = 20;
+        const maxBuilds = 28;
         let builtCount = 0;
         while (this.chunkBuildQueue.length > 0 && builtCount < maxBuilds) {
             const chunk = this.chunkBuildQueue.shift();
@@ -1592,7 +1598,7 @@ export class VoxelTerrain {
                 chunk.rebuild();
                 builtCount++;
             }
-            if (performance.now() - startTime > 8.0) break;
+            if (performance.now() - startTime > 10.0) break;
         }
     }
 
@@ -1608,10 +1614,30 @@ export class VoxelTerrain {
         if (!data) return;
         this.modifiedVoxels.clear();
         this.modifiedColumns.clear();
+        this.modifiedChunkSet.clear();
         if (data.modifiedVoxels) {
             for (const [key, val] of data.modifiedVoxels) {
                 if (Number.isFinite(val)) {
                     this.modifiedVoxels.set(key, val);
+                    const parts = key.split(',');
+                    if (parts.length === 3) {
+                        const vx = Number(parts[0]);
+                        const vy = Number(parts[1]);
+                        const vz = Number(parts[2]);
+                        const cx1 = Math.floor((vx - 1) / this.chunkSize);
+                        const cx2 = Math.floor(vx / this.chunkSize);
+                        const cy1 = Math.floor((vy - 1) / this.chunkSize);
+                        const cy2 = Math.floor(vy / this.chunkSize);
+                        const cz1 = Math.floor((vz - 1) / this.chunkSize);
+                        const cz2 = Math.floor(vz / this.chunkSize);
+                        for (let cx = cx1; cx <= cx2; cx++) {
+                            for (let cy = cy1; cy <= cy2; cy++) {
+                                for (let cz = cz1; cz <= cz2; cz++) {
+                                    this.modifiedChunkSet.add(`${cx},${cy},${cz}`);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1621,9 +1647,12 @@ export class VoxelTerrain {
             }
         }
         for (const chunk of this.loadedChunks.values()) {
+            chunk.initialized = false;
             chunk.dirty = true;
             this.chunkBuildQueue.push(chunk);
         }
+        // Force immediate chunk scan on next update so newly modified underground/sky chunks load right away
+        this.lastScanTime = 0;
     }
 
     update() {
@@ -1734,13 +1763,13 @@ export class VoxelTerrain {
     }
 
     // Cylinder / capsule collision tester: checks if a player-sized cylinder at (x, y, z) touches solid terrain
-    isCylinderColliding(x, y, z, radius = 0.45, height = 1.8) {
-        // Sample at 3 heights along the player's body: chest, waist, and lower torso (above step height)
-        const yLevels = [y - 0.35, y - 0.75, y - 1.15];
+    isCylinderColliding(x, y, z, radius = 0.50, height = 1.8) {
+        // Sample at 5 heights including camera eye-level (+8cm / -8cm) so camera near-plane never clips into overhanging rock walls!
+        const yLevels = [y + 0.08, y - 0.08, y - 0.38, y - 0.78, y - 1.15];
         const r = radius;
         const rDiag = radius * 0.7071;
 
-        for (let l = 0; l < 3; l++) {
+        for (let l = 0; l < 5; l++) {
             const py = yLevels[l];
             // Center
             if (this.isPointSolid(x, py, z)) return true;

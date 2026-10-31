@@ -391,12 +391,11 @@ function init() {
 
     scene.add(water);
 
-    // Marching Cubes Voxel Terrain (Planetary Engine with Height 88 voxels)
-    terrain = new VoxelTerrain(scene, 256, 88, 256, 3.0);
+    // Marching Cubes Voxel Terrain (Planetary Engine with Height 96 voxels)
+    terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
     createAtlantisMistRing(scene);
-    terrain.updateChunksAroundPlayer(playerPos, 1000);
 
-    // Auto-load custom map from localStorage if present
+    // Auto-load custom map from localStorage if present before building initial chunks
     try {
         const savedMap = localStorage.getItem("cryworld_custom_map");
         if (savedMap) {
@@ -407,6 +406,8 @@ function init() {
     } catch (e) {
         console.warn("Could not load custom map:", e);
     }
+
+    terrain.updateChunksAroundPlayer(playerPos, 1000, 340);
 
     heightmapData = new Uint8Array(512 * 512);
     updateHeightmap();
