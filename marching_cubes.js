@@ -408,6 +408,7 @@ class VoxelChunk {
         this.densities = new Float32Array(size * size * size);
         this.initialized = false;
         this.dirty = true;
+        this.inScene = false;
     }
 
     initializeDensities() {
@@ -574,7 +575,7 @@ class VoxelChunk {
             }
         }
 
-        // Load data into BufferGeometry attributes
+        // Load data into BufferGeometry attributes (only attach non-empty chunks to scene graph for 3x faster culling & raycasting!)
         if (positions.length > 0) {
             this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             this.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
@@ -582,12 +583,20 @@ class VoxelChunk {
             this.geometry.computeBoundingSphere();
             this.geometry.computeBoundingBox();
             this.mesh.visible = true;
+            if (!this.inScene) {
+                this.terrain.group.add(this.mesh);
+                this.inScene = true;
+            }
         } else {
-            // Empty chunk
+            // Empty chunk: keep out of scene graph so shadow map & raycaster skip it completely
             this.geometry.deleteAttribute('position');
             this.geometry.deleteAttribute('normal');
             this.geometry.deleteAttribute('color');
             this.mesh.visible = false;
+            if (this.inScene) {
+                this.terrain.group.remove(this.mesh);
+                this.inScene = false;
+            }
         }
     }
 }
@@ -669,6 +678,7 @@ export class VoxelTerrain {
             );
 
             shader.fragmentShader = `
+                uniform vec3 uCameraPos;
                 varying vec3 vMCWorldPos;
                 varying vec3 vMCTerrainNormal;
 
@@ -699,6 +709,10 @@ export class VoxelTerrain {
                     v += 0.0625 * mcNoise3(p);
                     return v;
                 }
+
+                float mcBumpNoise(vec3 p) {
+                    return 0.65 * mcNoise3(p) + 0.35 * mcNoise3(p * 2.35 + 7.1);
+                }
             ` + shader.fragmentShader;
 
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -707,64 +721,85 @@ export class VoxelTerrain {
                  float wy = vMCWorldPos.y;
                  float slope = clamp(vMCTerrainNormal.y, 0.0, 1.0);
 
-                 // Multi-scale 3D procedural noise for rock strata, foliage & sand grain
-                 float nMacro = mcFbm3(vMCWorldPos * 0.045);
-                 float nMed   = mcFbm3(vMCWorldPos * 0.22);
-                 float nFine  = mcNoise3(vMCWorldPos * 1.35);
-                 float nMicro = mcNoise3(vMCWorldPos * 5.5);
+                 // Multi-scale 3D procedural noise for fractured coastal rock, dappled jungle turf & coral sand
+                 float nMacro = mcFbm3(vMCWorldPos * 0.038);
+                 float nMed   = mcFbm3(vMCWorldPos * 0.19);
+                 float nFine  = mcNoise3(vMCWorldPos * 1.15);
+                 float nMicro = mcNoise3(vMCWorldPos * 5.2);
 
-                 // 1. Craggy Stratified Rock Cliffs (Linear color space for rich warm contrast)
-                 float rockMask = smoothstep(0.76, 0.52, slope);
-                 float strata = sin(wy * 1.45 + nMed * 5.0) * 0.5 + 0.5;
-                 float crevice = smoothstep(0.32, 0.68, nMed * 0.7 + nFine * 0.3);
-                 vec3 darkRock  = vec3(0.05, 0.045, 0.04);
-                 vec3 midRock   = vec3(0.20, 0.175, 0.145);
-                 vec3 lightRock = vec3(0.40, 0.355, 0.295);
-                 vec3 rockCol = mix(darkRock, midRock, crevice);
-                 rockCol = mix(rockCol, lightRock, strata * 0.55 + nMicro * 0.15);
-                 float ledgeMoss = smoothstep(0.55, 0.78, slope) * smoothstep(0.45, 0.75, nMacro) * smoothstep(123.0, 130.0, wy);
-                 rockCol = mix(rockCol, vec3(0.04, 0.14, 0.03), ledgeMoss * 0.65);
+                 // 1. Fractured Chiseled Coastal Cliffs & Crags (Ridged angular jointing — zero zebra stripes!)
+                 float ridgeFrac1 = 1.0 - abs(mcNoise3(vMCWorldPos * vec3(0.14, 0.20, 0.14)) * 2.0 - 1.0);
+                 float ridgeFrac2 = 1.0 - abs(mcNoise3(vMCWorldPos * 0.58 + 3.7) * 2.0 - 1.0);
+                 float rockCrevice = smoothstep(0.22, 0.78, ridgeFrac1 * 0.65 + ridgeFrac2 * 0.35);
 
-                 // 2. Lush Multi-Tone Tropical Grass & Jungle Undergrowth (Linear color space)
-                 vec3 deepJungle = vec3(0.018, 0.11, 0.022);
-                 vec3 lushGrass  = vec3(0.055, 0.24, 0.035);
-                 vec3 sunlitLeaf = vec3(0.14,  0.35, 0.045);
-                 vec3 vegCol = mix(deepJungle, lushGrass, smoothstep(0.28, 0.72, nMacro));
-                 vegCol = mix(vegCol, sunlitLeaf, smoothstep(0.45, 0.80, nMed) * 0.65);
-                 vegCol *= (0.88 + 0.24 * nFine);
+                 // Steep cliffs + high/exposed rocky crag ridges naturally expose stone through the turf
+                 float cragOutcrop = smoothstep(0.62, 0.84, ridgeFrac1 * 0.6 + nMacro * 0.4) * smoothstep(131.0, 146.0, wy) * smoothstep(0.92, 0.72, slope);
+                 float rockMask = clamp(smoothstep(0.80, 0.50, slope) + cragOutcrop * 0.85, 0.0, 1.0);
 
-                 // 3. Warm Golden-Coral Tropical Beach Sand with Wet Shoreline Band (Linear color space)
-                 vec3 drySand = mix(vec3(0.85, 0.68, 0.40), vec3(0.68, 0.50, 0.25), nMed * 0.6 + nMicro * 0.25);
-                 float wetZone = smoothstep(121.1, 119.95, wy);
-                 vec3 sandCol = mix(drySand, drySand * vec3(0.52, 0.48, 0.42), wetZone);
+                 vec3 darkCreviceRock = vec3(0.038, 0.040, 0.044); // Deep ambient-occluded slate fissure
+                 vec3 weatheredRock   = vec3(0.195, 0.180, 0.158); // Coastal volcanic/limestone body
+                 vec3 sunlitOchreRock = vec3(0.450, 0.390, 0.305); // Warm sun-kissed granite/sandstone highlight
+                 vec3 rockCol = mix(darkCreviceRock, weatheredRock, smoothstep(0.18, 0.62, rockCrevice));
+                 rockCol = mix(rockCol, sunlitOchreRock, smoothstep(0.55, 0.92, rockCrevice * 0.75 + nMed * 0.35) * 0.72 + nMicro * 0.12);
 
-                 // 4. Underwater Coral Reef & Turquoise Lagoon Shallows (< 120.0m)
+                 // Lush creeping emerald moss & tropical vines clinging to rock ledges
+                 float ledgeMoss = smoothstep(0.48, 0.78, slope) * smoothstep(0.42, 0.74, nMacro * 0.7 + nMed * 0.3) * smoothstep(122.0, 128.5, wy);
+                 rockCol = mix(rockCol, vec3(0.032, 0.135, 0.026), ledgeMoss * 0.72);
+
+                 // 2. Rich Multi-Tone Tropical Canopy Turf, Olive Scrub & Sunlit Clearings (Linear color space)
+                 vec3 deepJungleShadow = vec3(0.015, 0.088, 0.018);
+                 vec3 emeraldTurf      = vec3(0.048, 0.215, 0.030);
+                 vec3 warmSunlitGrass  = vec3(0.155, 0.340, 0.042);
+                 vec3 forestHumus      = vec3(0.095, 0.075, 0.042);
+                 vec3 vegCol = mix(deepJungleShadow, emeraldTurf, smoothstep(0.24, 0.70, nMacro));
+                 vegCol = mix(vegCol, warmSunlitGrass, smoothstep(0.44, 0.82, nMed) * 0.68);
+                 vegCol = mix(vegCol, forestHumus, smoothstep(0.66, 0.88, ridgeFrac2) * 0.22);
+                 vegCol *= (0.86 + 0.28 * nFine);
+
+                 // 3. Luminous Ivory-Gold Coral Beach Sand with Wet Glossy Swash Band
+                 vec3 ivorySand = vec3(0.90, 0.76, 0.49);
+                 vec3 goldenSand = vec3(0.70, 0.53, 0.28);
+                 vec3 drySand = mix(ivorySand, goldenSand, nMed * 0.55 + nMicro * 0.25);
+                 float wetZone = smoothstep(121.25, 119.95, wy);
+                 vec3 sandCol = mix(drySand, drySand * vec3(0.48, 0.45, 0.40), wetZone);
+
+                 // 4. Continuous Seamless Shading from Coral Reef (< 120m) -> Dune Scrub -> Inland Jungle (ZERO sharp line!)
                  if (wy < 120.0) {
                      float waterDepth = 120.0 - wy;
-                     float coralPatch = smoothstep(0.44, 0.68, mcFbm3(vMCWorldPos * 0.14));
-                     // Warm submerged sand transitioning to turquoise lagoon sand with depth
-                     vec3 wetShoreSand = drySand * vec3(0.52, 0.55, 0.50);
-                     vec3 lagoonSand   = vec3(0.12, 0.58, 0.56) * (0.9 + 0.2 * nFine);
-                     vec3 sandByDepth  = mix(wetShoreSand, lagoonSand, clamp(waterDepth / 3.5, 0.0, 1.0));
-                     vec3 coralCol     = mix(vec3(0.015, 0.08, 0.10), vec3(0.04, 0.14, 0.12), nMed);
-                     // Only show coral patches deeper than 1.2m so the immediate beach wading zone is pure sand
-                     float coralDepthMask = smoothstep(0.8, 2.8, waterDepth);
-                     vec3 shallowBed   = mix(sandByDepth, coralCol, coralPatch * 0.78 * coralDepthMask);
-                     float deepFade    = clamp(waterDepth / 18.0, 0.0, 1.0);
+                     float coralPatch = smoothstep(0.40, 0.65, mcFbm3(vMCWorldPos * 0.09) * 0.7 + nMed * 0.3);
+                     vec3 wetShoreSand = drySand * vec3(0.55, 0.62, 0.58);
+                     vec3 lagoonSand   = vec3(0.10, 0.64, 0.62) * (0.90 + 0.20 * nFine);
+                     vec3 sandByDepth  = mix(wetShoreSand, lagoonSand, clamp(waterDepth / 3.2, 0.0, 1.0));
+                     vec3 coralCol     = mix(vec3(0.012, 0.065, 0.085), vec3(0.038, 0.13, 0.10), nMed);
+                     float coralDepthMask = smoothstep(0.55, 2.2, waterDepth);
+                     vec3 shallowBed   = mix(sandByDepth, coralCol, coralPatch * 0.86 * coralDepthMask);
+                     float deepFade    = clamp(waterDepth / 19.0, 0.0, 1.0);
                      diffuseColor.rgb  = mix(shallowBed, diffuseColor.rgb * (0.75 + 0.35 * nMed), deepFade);
-                 } else if (wy < 126.2) {
-                     // Coastal beach to jungle transition
-                     float grassBlend = smoothstep(123.6 + nMacro * 1.6, 125.8 + nMacro * 1.2, wy);
-                     vec3 coastalSurface = mix(sandCol, vegCol, grassBlend);
-                     diffuseColor.rgb = mix(coastalSurface, rockCol, rockMask);
                  } else {
-                     // Inland hills, mountains & biome-tinted terrain
-                     float isTropicalOrForest = smoothstep(0.05, 0.25, diffuseColor.g - diffuseColor.r * 0.65);
-                     vec3 detailedBase = mix(diffuseColor.rgb * (0.82 + 0.35 * nMed), vegCol, isTropicalOrForest * 0.85);
-                     diffuseColor.rgb = mix(detailedBase, rockCol, rockMask);
+                     // Wide, domain-warped organic transition (121.4m .. 131.5m) with pioneer dune-grass tufts & sandy hollows!
+                     float duneWarp = (nMacro - 0.5) * 6.8 + (nMed - 0.5) * 3.4 + (nFine - 0.5) * 1.6;
+                     float gentleCoveBoost = smoothstep(0.72, 0.96, slope) * 2.3;
+                     float effCoastalY = wy + duneWarp - gentleCoveBoost;
+
+                     // Stage A: Dry beach sand -> dappled pioneer coastal scrub / olive dune grass tufts
+                     float scrubBlend = smoothstep(121.6, 126.4, effCoastalY);
+                     // Clumpy pioneer grass islands sprouting inside the upper sand before full turf forms
+                     float tuftPatches = smoothstep(0.42, 0.68, nMed * 0.62 + nFine * 0.38) * smoothstep(120.9, 123.8, wy);
+                     vec3 duneScrubCol = mix(vec3(0.26, 0.27, 0.085), vegCol, 0.58);
+                     vec3 sandToScrub  = mix(sandCol, duneScrubCol, clamp(scrubBlend * 0.72 + tuftPatches * 0.52, 0.0, 1.0));
+
+                     // Stage B: Pioneer dune scrub -> full lush tropical / planetary biome surface (100% continuous, zero cut!)
+                     float fullVegBlend = smoothstep(124.2, 130.6, effCoastalY);
+                     float isTropicalOrForest = smoothstep(0.04, 0.24, diffuseColor.g - diffuseColor.r * 0.65);
+                     // Near beaches (wy < 133m) ensure vertex sand-tint never blocks lush tropical green transition
+                     float coastalTropical = max(isTropicalOrForest, 1.0 - smoothstep(127.0, 135.0, wy));
+                     vec3 inlandSurface = mix(diffuseColor.rgb * (0.82 + 0.35 * nMed), vegCol, coastalTropical * 0.90);
+
+                     vec3 organicGround = mix(sandToScrub, inlandSurface, fullVegBlend);
+                     diffuseColor.rgb = mix(organicGround, rockCol, rockMask);
                  }
 
-                 // Subtle mystical sea-mist veil along the outer boundary ring of Plato's Atlantis (r = 630m .. 835m)
+                 // Subtle mystical sea-mist veil along the outer boundary ring of Cleito (r = 615m .. 855m)
                  float rAtlantis = length(vMCWorldPos.xz);
                  float mistBand = smoothstep(615.0, 685.0, rAtlantis) * (1.0 - smoothstep(785.0, 855.0, rAtlantis));
                  if (mistBand > 0.001 && wy > 119.5) {
@@ -776,15 +811,19 @@ export class VoxelTerrain {
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <normal_fragment_maps>',
                 `#include <normal_fragment_maps>
-                 // Procedural 3D Bump / Normal Perturbation for craggy rocks and lush foliage
-                 vec3 bumpPos = vMCWorldPos * mix(0.85, 0.42, rockMask);
-                 float eps = 0.12;
-                 float h0 = mcFbm3(bumpPos);
-                 float hx = mcFbm3(bumpPos + vec3(eps, 0.0, 0.0)) - h0;
-                 float hy = mcFbm3(bumpPos + vec3(0.0, eps, 0.0)) - h0;
-                 float hz = mcFbm3(bumpPos + vec3(0.0, 0.0, eps)) - h0;
-                 float bumpStrength = mix(0.14, 0.42, rockMask) * smoothstep(119.5, 121.5, wy);
-                 normal = normalize(normal - vec3(hx, hy, hz) * (bumpStrength / eps));`
+                 // Distance-gated 3D Chiseled Micro-Normal Relief (crisp foreground rocks & sand ripples + 3x faster distant GPU!)
+                 float camDistMC = length(vMCWorldPos - uCameraPos);
+                 float bumpLod = 1.0 - smoothstep(48.0, 155.0, camDistMC);
+                 if (bumpLod > 0.01) {
+                     vec3 bumpPos = vMCWorldPos * mix(1.05, 0.52, rockMask);
+                     float eps = 0.11;
+                     float h0 = mcBumpNoise(bumpPos);
+                     float hx = mcBumpNoise(bumpPos + vec3(eps, 0.0, 0.0)) - h0;
+                     float hy = mcBumpNoise(bumpPos + vec3(0.0, eps, 0.0)) - h0;
+                     float hz = mcBumpNoise(bumpPos + vec3(0.0, 0.0, eps)) - h0;
+                     float bumpStrength = mix(0.12, 0.52, rockMask) * smoothstep(119.5, 121.2, wy) * bumpLod;
+                     normal = normalize(normal - vec3(hx, hy, hz) * (bumpStrength / eps));
+                 }`
             );
 
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -883,51 +922,51 @@ export class VoxelTerrain {
         if (distFromCenter < 282.0) {
             if (distFromCenter >= 208.0) {
                 _tempBiomeInfo.type = 'atlantis_mist';
-                _tempBiomeInfo.name = '🌫️ NEBBIA DI CONFINE D\'ATLANTIDE';
+                _tempBiomeInfo.name = '🌫️ NEBBIA DI CONFINE DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (vz < -35.0 && vz > -206.0 && Math.abs(vx) < 13.5) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '⛵ GRANDE CANALE PRINCIPALE';
+                _tempBiomeInfo.name = '⛵ GRANDE CANALE DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 26.0 && wy > 142.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '⛰️ MONTE SACRO D\'ATLANTIDE';
+                _tempBiomeInfo.name = '⛰️ MONTE SACRO DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 39.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '🏛️ ISOLA CENTRALE DEL MONTE SACRO';
+                _tempBiomeInfo.name = '🏛️ COLLINA E SANTUARIO DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 60.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '⚓ PORTO INTERNO (1° ANELLO D\'ACQUA)';
+                _tempBiomeInfo.name = '⚓ LAGUNA INTERNA DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 86.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '🏝️ 1° ANELLO DI TERRA';
+                _tempBiomeInfo.name = '🏝️ 1° ANELLO DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 108.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '🌊 2° ANELLO D\'ACQUA';
+                _tempBiomeInfo.name = '🌊 2° LAGUNA CORALLINA DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 138.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '🌴 2° ANELLO DI TERRA';
+                _tempBiomeInfo.name = '🌴 2° ANELLO DI CLEITO';
                 return _tempBiomeInfo;
             }
             if (distFromCenter < 162.0) {
                 _tempBiomeInfo.type = 'lagoon_atoll';
-                _tempBiomeInfo.name = '🌊 3° ANELLO D\'ACQUA';
+                _tempBiomeInfo.name = '🌊 3° LAGUNA CORALLINA DI CLEITO';
                 return _tempBiomeInfo;
             }
             _tempBiomeInfo.type = 'lagoon_atoll';
-            _tempBiomeInfo.name = '🏖️ 3° ANELLO DI TERRA (CINTA ESTERNA)';
+            _tempBiomeInfo.name = '🏖️ CINTA ESTERNA DI CLEITO (3° ANELLO)';
             return _tempBiomeInfo;
         }
 
@@ -1257,108 +1296,135 @@ export class VoxelTerrain {
     }
 
     // =========================================================
-    // PLATO'S CONCENTRIC ATLANTIS GENERATOR (Sacred Mountain + 3 Water Rings + 3 Land Rings + Grand Canal)
+    // CLEITO — PLATO'S CONCENTRIC ATLANTIS GENERATOR
+    // (Sculpted Craggy Peaks, Scalloped Sandy Coves, Turquoise Coral Reef Shelves, Lagoon Islets & Grand Canal)
     // =========================================================
     getAtlantisArchipelago(x, z) {
         const r = Math.sqrt(x * x + z * z);
-        if (r > 236.0) {
+        if (r > 238.0) {
             return { weight: 0.0, hill: 0.0 };
         }
 
-        // Subtle organic shoreline ripples (attenuated near center so Sacred Mountain stays symmetrically centered)
-        const centerCalm = Math.min(1.0, r / 28.0);
-        const shoreRipple = (this.noise.noise2d(x * 0.042, z * 0.042) * 2.1 + this.noise.noise2d(x * 0.11, z * 0.11) * 0.75) * centerCalm;
+        // Scalloped sandy cove & headland coastline modulation (creates natural crescent bays & rocky promontories)
+        const centerCalm = Math.min(1.0, r / 26.0);
+        const shoreRipple = (
+            this.noise.noise2d(x * 0.036, z * 0.036) * 3.2 +
+            this.noise.noise2d(x * 0.095, z * 0.095) * 1.15
+        ) * centerCalm;
         const rOrg = Math.max(0.0, r + shoreRipple);
+
+        // Ridged-multifractal crag factor: sharp chiseled rocky peaks alternating with lush green saddles & sandy coves!
+        const rN1 = 1.0 - Math.abs(this.noise.noise2d(x * 0.048, z * 0.048));
+        const rN2 = 1.0 - Math.abs(this.noise.noise2d(x * 0.108 + 13.7, z * 0.108 - 8.3));
+        const cragFactor = Math.pow(Math.max(0.0, rN1 * 0.70 + rN2 * 0.30), 2.15);
 
         let weight = 0.0;
         let hill = 0.0;
 
-        // 0. CENTRAL SACRED ISLAND & IL MONTE SACRO (dry shore r = 0 .. 38 vox = 0 .. 114m)
-        if (rOrg < 58.0) {
-            const p0 = Math.cos(Math.min(1.0, rOrg / 58.0) * Math.PI * 0.5);
-            weight = Math.max(weight, Math.pow(p0, 0.62));
-            // Fertile coastal terrace around the foot of the Sacred Mountain
-            let centralHill = 11.5 * Math.pow(p0, 0.82);
+        // 0. CENTRAL ISLAND & COLLINA SACRA DI CLEITO (dry shore r ≈ 0 .. 38 vox = 0 .. 114m, coral shelf out to 46)
+        if (rOrg < 48.0) {
+            const p0 = Math.cos(Math.min(1.0, rOrg / 48.0) * Math.PI * 0.5);
+            weight = Math.max(weight, Math.pow(p0, 0.58));
+            // Sculpted coastal terrace with scalloped coves and craggy spurs
+            let centralHill = (9.5 + cragFactor * 6.5) * Math.pow(p0, 0.85);
 
-            // Majestic Sacred Mountain rising at (0, 0) up to ~208m (+88m above sea level) with 5 rocky radial spurs
-            if (r < 29.0) {
+            // Majestic Craggy Sacred Mountain of Cleito rising at (0, 0) up to ~218m (+98m above sea level)
+            if (r < 32.0) {
                 const theta = Math.atan2(z, x);
-                const tMount = Math.max(0.0, 1.0 - r / 29.0);
-                const spurWave = 0.5 + 0.5 * Math.cos(theta * 5.0 + r * 0.11);
-                const ridgeDetail = this.noise.noise2d(x * 0.075, z * 0.075) * 2.4;
-                let sacredRise = Math.pow(tMount, 1.48) * 25.5
-                               + Math.pow(tMount, 1.15) * (1.0 - tMount) * spurWave * 11.5
-                               + ridgeDetail * tMount;
-                // Walkable sacred summit sanctuary plateau at the very apex (r < 3.4 voxels = 10m)
-                if (r < 3.4) {
-                    const flatT = 1.0 - r / 3.4;
-                    sacredRise -= flatT * 1.8;
+                const tMount = Math.max(0.0, 1.0 - r / 32.0);
+                const spurWave = Math.pow(0.5 + 0.5 * Math.cos(theta * 5.0 + r * 0.13), 1.35);
+                let sacredRise = Math.pow(tMount, 1.42) * 26.5
+                               + Math.pow(tMount, 0.95) * (1.0 - tMount * 0.65) * spurWave * 14.0
+                               + cragFactor * 7.5 * Math.pow(tMount, 0.75);
+                // Walkable summit sanctuary ledge at the apex (r < 3.2 voxels = 9.6m)
+                if (r < 3.2) {
+                    sacredRise -= (1.0 - r / 3.2) * 1.6;
                 }
                 centralHill += Math.max(0.0, sacredRise);
             }
             hill = Math.max(hill, centralHill);
         }
 
-        // Helper for each concentric Land Ring (separated by deep navigable Water Rings!)
-        // 1st Water Ring (Inner Harbor): r ≈ 38 .. 60 vox (114m .. 180m)
-        // 1st Land Ring: dry shore r ≈ 60 .. 86 vox (180m .. 258m), R_mid = 73, W_half = 22
-        const d1 = Math.abs(rOrg - 73.0) / 22.0;
+        // 1st Water Ring (Laguna Interna di Cleito): r ≈ 38 .. 60 vox (114m .. 180m) with glowing shallow coral reef shelves!
+        // 1st Land Ring of Cleito: dry shore r ≈ 60 .. 86 vox (180m .. 258m), R_mid = 73, W_half = 24.5 (includes reef shelf)
+        const d1 = Math.abs(rOrg - 73.0) / 24.5;
         if (d1 < 1.0) {
             const p1 = Math.cos(d1 * Math.PI * 0.5);
-            const ridge1 = Math.max(-1.2, this.noise.noise2d(x * 0.045, z * 0.045) * 2.6);
-            weight = Math.max(weight, Math.pow(p1, 0.64));
-            hill = Math.max(hill, (12.6 + ridge1) * Math.pow(p1, 0.85));
+            const coveDip1 = this.noise.noise2d(x * 0.042 + 5.1, z * 0.042 - 3.4) * 2.2;
+            weight = Math.max(weight, Math.pow(p1, 0.60));
+            hill = Math.max(hill, Math.max(1.5, (10.4 + coveDip1 + cragFactor * 11.8) * Math.pow(p1, 0.92)));
         }
 
         // 2nd Water Ring: r ≈ 86 .. 108 vox (258m .. 324m)
-        // 2nd Land Ring: dry shore r ≈ 108 .. 138 vox (324m .. 414m), R_mid = 123, W_half = 25
-        const d2 = Math.abs(rOrg - 123.0) / 25.0;
+        // 2nd Land Ring of Cleito: dry shore r ≈ 108 .. 138 vox (324m .. 414m), R_mid = 123, W_half = 27.5
+        const d2 = Math.abs(rOrg - 123.0) / 27.5;
         if (d2 < 1.0) {
             const p2 = Math.cos(d2 * Math.PI * 0.5);
-            const ridge2 = Math.max(-1.5, this.noise.noise2d(x * 0.038, z * 0.038) * 3.4);
-            weight = Math.max(weight, Math.pow(p2, 0.64));
-            hill = Math.max(hill, (14.6 + ridge2) * Math.pow(p2, 0.85));
+            const coveDip2 = this.noise.noise2d(x * 0.036 - 8.2, z * 0.036 + 6.7) * 2.8;
+            weight = Math.max(weight, Math.pow(p2, 0.60));
+            hill = Math.max(hill, Math.max(1.5, (12.0 + coveDip2 + cragFactor * 14.5) * Math.pow(p2, 0.90)));
         }
 
         // 3rd Water Ring: r ≈ 138 .. 162 vox (414m .. 486m)
-        // 3rd Land Ring (Outer Belt): dry shore r ≈ 162 .. 196 vox (486m .. 588m), R_mid = 179, W_half = 28
-        const d3 = Math.abs(rOrg - 179.0) / 28.0;
+        // 3rd Land Ring of Cleito (Outer Belt): dry shore r ≈ 162 .. 196 vox (486m .. 588m), R_mid = 179, W_half = 30.5
+        const d3 = Math.abs(rOrg - 179.0) / 30.5;
         if (d3 < 1.0) {
             const p3 = Math.cos(d3 * Math.PI * 0.5);
-            const crag3 = Math.max(0.0, 1.0 - Math.abs(this.noise.noise2d(x * 0.028, z * 0.028))) * 4.5;
-            const ridge3 = Math.max(-1.5, this.noise.noise2d(x * 0.04, z * 0.04) * 3.0);
-            weight = Math.max(weight, Math.pow(p3, 0.64));
-            hill = Math.max(hill, (16.2 + ridge3 + crag3 * p3) * Math.pow(p3, 0.82));
+            const coveDip3 = this.noise.noise2d(x * 0.032 + 11.4, z * 0.032 - 14.2) * 3.2;
+            weight = Math.max(weight, Math.pow(p3, 0.60));
+            hill = Math.max(hill, Math.max(1.8, (13.6 + coveDip3 + cragFactor * 17.5) * Math.pow(p3, 0.88)));
         }
 
-        // Circular crown of 10 small sentinel sea-stacks/islets just outside the 3rd Land Ring (r ≈ 206 vox = 618m),
-        // leaving the Grand Canal gateway (-Z) wide open!
-        if (r > 194.0 && r < 222.0 && z > -188.0) {
-            const numIslets = 10;
+        // Picturesque small lagoon islets & coral rock motus nestled inside the concentric lagoons (away from -Z Grand Canal!)
+        const lagoonIslets = [
+            { ix: -38.0, iz:  28.0, rad: 6.8, h: 9.8 },
+            { ix:  44.0, iz: -18.0, rad: 6.2, h: 9.2 },
+            { ix: -84.0, iz:  48.0, rad: 7.4, h: 11.0 },
+            { ix:  88.0, iz:  42.0, rad: 7.0, h: 10.4 },
+            { ix: -118.0, iz: -92.0, rad: 7.8, h: 12.2 }
+        ];
+        for (let m = 0; m < lagoonIslets.length; m++) {
+            const isl = lagoonIslets[m];
+            const dMotu = Math.sqrt((x - isl.ix) * (x - isl.ix) + (z - isl.iz) * (z - isl.iz)) + shoreRipple * 0.45;
+            if (dMotu < isl.rad) {
+                const pM = Math.cos((dMotu / isl.rad) * Math.PI * 0.5);
+                weight = Math.max(weight, Math.pow(pM, 0.56));
+                hill = Math.max(hill, (isl.h + cragFactor * 5.0) * Math.pow(pM, 0.88));
+            }
+        }
+
+        // Circular crown of 12 dramatic sea-stacks & reef islets just outside the 3rd Ring (r ≈ 208 vox = 624m)
+        if (r > 193.0 && r < 224.0 && z > -188.0) {
+            const numIslets = 12;
             for (let k = 0; k < numIslets; k++) {
-                const ang = -Math.PI * 0.36 + (k / (numIslets - 1)) * (Math.PI * 1.72); // Skips -PI/2 (-Z canal mouth)
-                // Rotate standard angle so -PI/2 is at (0, -206) -> sin(ang) on Z, cos(ang) on X shifted by +PI/2
-                const thetaI = -Math.PI * 0.5 + 0.42 + (k / (numIslets - 1)) * (Math.PI * 2.0 - 0.84);
-                const ix = Math.cos(thetaI) * 207.0;
-                const iz = Math.sin(thetaI) * 207.0;
-                const dIslet = Math.sqrt((x - ix) * (x - ix) + (z - iz) * (z - iz)) + shoreRipple * 0.7;
-                if (dIslet < 11.5) {
-                    const pI = Math.cos((dIslet / 11.5) * Math.PI * 0.5);
-                    weight = Math.max(weight, Math.pow(pI, 0.60));
-                    hill = Math.max(hill, 13.5 * Math.pow(pI, 0.90));
+                const thetaI = -Math.PI * 0.5 + 0.40 + (k / (numIslets - 1)) * (Math.PI * 2.0 - 0.80);
+                const radI = 207.0 + ((k % 2 === 0) ? 3.5 : -2.5);
+                const ix = Math.cos(thetaI) * radI;
+                const iz = Math.sin(thetaI) * radI;
+                const dIslet = Math.sqrt((x - ix) * (x - ix) + (z - iz) * (z - iz)) + shoreRipple * 0.65;
+                if (dIslet < 12.0) {
+                    const pI = Math.cos((dIslet / 12.0) * Math.PI * 0.5);
+                    weight = Math.max(weight, Math.pow(pI, 0.58));
+                    hill = Math.max(hill, (12.5 + cragFactor * 9.5) * Math.pow(pI, 0.88));
                 }
             }
         }
 
-        // IL CANALE PRINCIPALE: Straight monumental waterway along -Z connecting the Inner Harbor (z = -48)
-        // directly through all 3 Land Rings out to the Open Sea (z = -212)!
+        // Turquoise Coral Reef Shallows: subtle submerged coral heads & sandy shoals (1.4m - 4.8m depth) fringing the rings,
+        // while keeping the center of each concentric Water Ring & Grand Canal deep sapphire navigable water (15m - 20m)!
+        if (r < 214.0 && weight > 0.16 && weight < 0.72) {
+            const coralShoal = Math.max(0.0, this.noise.noise2d(x * 0.085, z * 0.085)) * 0.14;
+            weight = Math.min(0.68, weight + coralShoal);
+        }
+
+        // IL GRANDE CANALE DI CLEITO: Straight monumental waterway along -Z connecting the Inner Lagoon (z = -48)
+        // directly through all 3 Land Rings out to the Open Sea (z = -214)!
         if (z < -36.0 && z > -218.0) {
-            // Smooth entry inside the 1st Water Ring (-36 .. -52) and flared Harbor Mouth at the Open Sea (-182 .. -212)
             const zEntryFade = Math.min(1.0, Math.max(0.0, (-36.0 - z) / 14.0));
             const mouthFlare = Math.max(0.0, (-z - 178.0) / 34.0);
             const canalHalfWater = 9.0 + mouthFlare * 6.5; // 54m navigable channel widening to 93m at sea entrance!
-            const canalTransition = 6.5; // Smooth golden beach & sculpted stone bank transition
-            const absX = Math.abs(x + this.noise.noise2d(x * 0.06, z * 0.06) * 0.85);
+            const canalTransition = 7.0; // Natural coral-sand bank & rocky headland framing
+            const absX = Math.abs(x + this.noise.noise2d(x * 0.06, z * 0.06) * 0.95);
 
             if (absX < canalHalfWater + canalTransition) {
                 let carve = 0.0;
@@ -1369,20 +1435,19 @@ export class VoxelTerrain {
                     carve = 0.5 + 0.5 * Math.cos(tBank * Math.PI);
                 }
                 carve *= zEntryFade;
-                // Carve deep navigable seabed (weight -> 0.12 gives ~16m crystal sapphire water depth)
                 weight = weight * (1.0 - carve) + 0.10 * carve * (1.0 - mouthFlare * 0.5);
                 hill = hill * (1.0 - carve);
-            } else if (absX < canalHalfWater + canalTransition + 6.0 && weight > 0.65) {
-                // Subtle monumental headland elevation framing the Grand Canal gates on each Land Ring
-                const tGate = 1.0 - Math.abs(absX - (canalHalfWater + canalTransition + 3.0)) / 3.0;
-                hill += Math.max(0.0, tGate) * 3.2 * zEntryFade;
+            } else if (absX < canalHalfWater + canalTransition + 6.5 && weight > 0.65) {
+                // Craggy coastal sentinel cliffs framing the Grand Canal gates on each Land Ring
+                const tGate = 1.0 - Math.abs(absX - (canalHalfWater + canalTransition + 3.25)) / 3.25;
+                hill += Math.max(0.0, tGate) * (4.2 + cragFactor * 4.5) * zEntryFade;
             }
         }
 
-        // Keep gentle turquoise reef bathymetry in the 3 concentric Water Rings (~13m - 18m navigable depth)
-        if (r < 196.0 && weight < 0.14) {
-            const innerBasinMask = 1.0 - Math.max(0.0, (r - 178.0) / 18.0);
-            weight = Math.max(weight, 0.12 * innerBasinMask);
+        // Keep deep cobalt-sapphire bathymetry in the middle of the 3 concentric Water Rings (~16m - 20m navigable depth)
+        if (r < 198.0 && weight < 0.13) {
+            const innerBasinMask = 1.0 - Math.max(0.0, (r - 180.0) / 18.0);
+            weight = Math.max(weight, 0.11 * innerBasinMask);
         }
 
         return { weight, hill };
@@ -1421,14 +1486,15 @@ export class VoxelTerrain {
             density = 1.0;
         }
         
-        // Add 3D bumpy noise ONLY on elevated hills/cliffs above the beach waterline (y > 40.8)
-        // This prevents 3D noise blobs from poking through shallow water as ugly grey floating blotches!
-        if (y > 40.8) {
+        // Add 3D chiseled rock-facet & crag noise ONLY on elevated hills/cliffs above the beach waterline (y > 41.0)
+        // Keeps beaches smooth & clean while giving rocky headlands and Cleito's Sacred Mountain sculptural 3D crags!
+        if (y > 41.0) {
             const noiseY = y - 32.0;
             const finalHeightAbove = baseHeightRaw * smoothWeightAbove + hillHeight * smoothWeightAbove;
-            if (noiseY < finalHeightAbove + 2.0) {
-                const aboveWaterMask = Math.min(1.0, (y - 40.8) / 2.2);
-                const bumpyNoise = this.noise.noise3d(x * 0.12, noiseY * 0.12, z * 0.12) * 1.65 * aboveWaterMask;
+            if (noiseY < finalHeightAbove + 2.4) {
+                const aboveWaterMask = Math.min(1.0, (y - 41.0) / 2.6);
+                const crag3D = (1.0 - Math.abs(this.noise.noise3d(x * 0.14, noiseY * 0.16, z * 0.14))) * 0.95;
+                const bumpyNoise = (this.noise.noise3d(x * 0.11, noiseY * 0.11, z * 0.11) * 1.55 + (crag3D - 0.45) * 1.15) * aboveWaterMask;
                 density += bumpyNoise;
             }
         }
@@ -1495,8 +1561,8 @@ export class VoxelTerrain {
         const yTop = yBottom + this.chunkSize;
 
         const clampedMinH = Math.min(bounds.minH, this.maxY - 2.0);
-        const minSurface = Math.max(0.0, clampedMinH - 12.0);
-        const maxSurface = bounds.maxH + 12.0;
+        const minSurface = Math.max(0.0, clampedMinH - 7.5);
+        const maxSurface = bounds.maxH + 7.5;
 
         return (yTop >= minSurface && yBottom <= maxSurface);
     }
@@ -1550,7 +1616,6 @@ export class VoxelTerrain {
                         if (!this.loadedChunks.has(key)) {
                             const chunk = new VoxelChunk(cx, cy, cz, this);
                             this.loadedChunks.set(key, chunk);
-                            this.group.add(chunk.mesh);
                             
                             // If immediately around player, build right now without delay!
                             if (distColSq <= immRadiusSq) {
@@ -1567,7 +1632,10 @@ export class VoxelTerrain {
             // Unload chunks that are too far
             for (const [key, chunk] of this.loadedChunks.entries()) {
                 if (!activeKeys.has(key)) {
-                    this.group.remove(chunk.mesh);
+                    if (chunk.inScene) {
+                        this.group.remove(chunk.mesh);
+                        chunk.inScene = false;
+                    }
                     chunk.geometry.dispose();
                     this.loadedChunks.delete(key);
                     

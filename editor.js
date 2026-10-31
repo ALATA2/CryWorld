@@ -142,8 +142,10 @@ function init() {
     const theta = THREE.MathUtils.degToRad(195);
     sun.setFromSphericalCoords(1, phi, theta);
 
-    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.35);
-    dirLight.position.copy(sun).multiplyScalar(300);
+    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.40);
+    dirLight.target.position.set(0, 126, 0);
+    scene.add(dirLight.target);
+    dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 420);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -153,6 +155,7 @@ function init() {
     dirLight.shadow.camera.right = 450;
     dirLight.shadow.camera.top = 450;
     dirLight.shadow.camera.bottom = -450;
+    dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
     // Photorealistic Tropical Sky Dome with Volumetric Cumulus Clouds matching Gameplay
@@ -347,29 +350,49 @@ function init() {
 
              vec3 sunDirN = normalize(sunDirection);
              vec3 viewDir = normalize(eye - worldPosition.xyz);
-             float waveRipple = 0.80 + 0.45 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
+             float NdotV  = clamp(dot(surfaceNormal, viewDir), 0.0, 1.0);
+             float waveRipple = 0.84 + 0.42 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
+             float physFresnel = 0.035 + 0.46 * pow(1.0 - NdotV, 4.2);
 
-             float shallowGlow = exp(-waterDepth * 0.22) * smoothstep(0.15, 2.2, waterDepth);
-             float midReefGlow = exp(-waterDepth * 0.09) * smoothstep(0.5, 3.5, waterDepth);
-             vec3 turquoiseScatter = vec3(0.0, 0.42, 0.46) * shallowGlow * waveRipple
-                                   + vec3(0.0, 0.16, 0.28) * midReefGlow * waveRipple;
+             vec3 ultraShallowTurq = vec3(0.015, 0.58, 0.64);
+             vec3 midLagoonCyan    = vec3(0.012, 0.28, 0.48);
+             vec3 deepRoyalCobalt  = vec3(0.008, 0.072, 0.235);
 
-             finalColor = outgoingLight * mix(vec3(0.82, 0.96, 1.02), vec3(0.75, 1.12, 1.15), shallowGlow) + turquoiseScatter;
+             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(0.9, 4.2, waterDepth));
+             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(3.8, 10.5, waterDepth));
+
+             float reefMacro  = wFbm(worldPosition.xz * 0.048);
+             float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
+             float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
+                              * smoothstep(0.55, 1.75, waterDepth)
+                              * (1.0 - smoothstep(4.8, 8.2, waterDepth));
+             vec3 darkCoralReef = mix(vec3(0.008, 0.052, 0.082), vec3(0.018, 0.115, 0.135), reefDetail);
+             waterBody = mix(waterBody, darkCoralReef, reefPatch * 0.82);
+
+             finalColor = mix(waterBody * waveRipple, outgoingLight, physFresnel);
 
              vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.4 + pow(NdotH, 36.0) * 0.30);
+             finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 240.0) * 2.5 + pow(NdotH, 32.0) * 0.34);
 
-             float foamNoise = wFbm(worldPosition.xz * 0.65 + vec2(time * 0.5, -time * 0.35));
-             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 5.0 + foamNoise * 3.0);
-             float shoreLace = smoothstep(0.55, 0.06, waterDepth)
+             float foamNoise = wFbm(worldPosition.xz * 0.62 + vec2(time * 0.48, -time * 0.34));
+             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);
+             float shoreLace = smoothstep(0.62, 0.06, waterDepth)
                              * smoothstep(0.0, 0.05, waterDepth)
-                             * smoothstep(0.45, 0.80, foamNoise * 0.7 + lapWave * 0.45);
-             finalColor = mix(finalColor, vec3(0.95, 0.98, 1.0), shoreLace * 0.48);
+                             * smoothstep(0.42, 0.78, foamNoise * 0.68 + lapWave * 0.46);
 
-             float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
-             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
-             distAlpha = max(distAlpha, shoreLace * 0.55);
+             float breakerWave = 0.5 + 0.5 * sin(waterDepth * 5.2 - time * 3.4 + reefDetail * 4.5);
+             float reefBreaker = smoothstep(2.4, 1.45, waterDepth)
+                               * smoothstep(0.75, 1.35, waterDepth)
+                               * smoothstep(0.62, 0.86, foamNoise * 0.55 + breakerWave * 0.50)
+                               * (0.45 + 0.55 * reefPatch);
+
+             float surfWhite = clamp(shoreLace * 0.68 + reefBreaker * 0.52, 0.0, 0.85);
+             finalColor = mix(finalColor, vec3(0.96, 0.99, 1.0), surfWhite);
+
+             float opticalAlpha = 1.0 - exp(-waterDepth * 0.52);
+             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(3.2, 8.5, waterDepth)), 0.0, alpha);
+             distAlpha = max(distAlpha, surfWhite * 0.72);
 
              // Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
              float rAtlantisW = length(worldPosition.xz);

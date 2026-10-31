@@ -10,7 +10,8 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, heightmapTexture, heightmapData, waterSystem;
+let terrain, water, sky, sun, dirLight, heightmapTexture, heightmapData, waterSystem;
+let lastShadowSnapX = 1e9, lastShadowSnapZ = 1e9, prevShadowQueueLen = 0;
 const cameraPosUniform = { value: new THREE.Vector3() };
 let controls;
 let spear, pickaxe, manipulator, leftArm, rightArm, isDiggingAnim = false, animTime = 0;
@@ -128,19 +129,21 @@ function init() {
     hemiLight.position.set(0, 300, 0);
     scene.add(hemiLight);
 
-    // Warm golden-white tropical sunlight casting crisp shadows and water shimmer
-    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.35);
+    // Warm golden-white tropical sunlight casting crisp shadows across Cleito's palms, trees & crags
+    dirLight = new THREE.DirectionalLight(0xfff2d6, 2.40);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 260;
-    const d = 95;
+    dirLight.shadow.camera.near = 25;
+    dirLight.shadow.camera.far = 750;
+    const d = 220;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
-    dirLight.shadow.bias = -0.0004;
+    dirLight.shadow.bias = -0.0005;
+    dirLight.target.position.set(0, 126, 0);
+    scene.add(dirLight.target);
     scene.add(dirLight);
 
     // 4. Sky and Sun Configuration (Photorealistic Tropical Sky with Volumetric Cumulus Clouds & Stars)
@@ -327,7 +330,7 @@ function init() {
             sky.material.uniforms['sunDirection'].value.copy(sun);
         }
         
-        dirLight.position.copy(sun).multiplyScalar(100);
+        dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 360);
         
         // Match fog to clear sky horizon blue
         scene.fog.color.setHex(0x8ce3ff);
@@ -468,40 +471,60 @@ function init() {
                  waterDepth = mix(25.5, hmSample, hmEdge);
              }
 
-             // 2. Physical Optical Water Coloring (Preserves 100% of 3D Wave Ripples & Reflections — Zero Patina!)
+             // 2. Photorealistic Coral-Reef Lagoon Optics (Electric Turquoise Shallows, Living Coral Patches & Deep Sapphire)
              vec3 sunDirN = normalize(sunDirection);
              vec3 viewDir = normalize(eye - worldPosition.xyz);
-             float waveRipple = 0.80 + 0.45 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
+             float NdotV  = clamp(dot(surfaceNormal, viewDir), 0.0, 1.0);
+             float waveRipple = 0.84 + 0.42 * clamp(dot(surfaceNormal, sunDirN), 0.0, 1.0);
 
-             // Subtle turquoise optical scattering in shallow reef water (1m - 12m), rich marine cobalt in deep water
-             float shallowGlow = exp(-waterDepth * 0.22) * smoothstep(0.15, 2.2, waterDepth);
-             float midReefGlow = exp(-waterDepth * 0.09) * smoothstep(0.5, 3.5, waterDepth);
+             // Physical Schlick Fresnel (prevents washed-out sky mirror over shallow turquoise coral reefs)
+             float physFresnel = 0.035 + 0.46 * pow(1.0 - NdotV, 4.2);
 
-             vec3 turquoiseScatter = vec3(0.0, 0.42, 0.46) * shallowGlow * waveRipple
-                                   + vec3(0.0, 0.16, 0.28) * midReefGlow * waveRipple;
+             vec3 ultraShallowTurq = vec3(0.015, 0.58, 0.64);
+             vec3 midLagoonCyan    = vec3(0.012, 0.28, 0.48);
+             vec3 deepRoyalCobalt  = vec3(0.008, 0.072, 0.235);
 
-             // Keep outgoingLight's crisp wave normals & sky reflections intact, enriched with tropical turquoise depth
-             finalColor = outgoingLight * mix(vec3(0.82, 0.96, 1.02), vec3(0.75, 1.12, 1.15), shallowGlow) + turquoiseScatter;
+             vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(0.9, 4.2, waterDepth));
+             waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(3.8, 10.5, waterDepth));
+
+             // Procedural Living Coral Reef Heads & Mottled Reef Shadows (0.55m .. 8.2m depth)
+             float reefMacro  = wFbm(worldPosition.xz * 0.048);
+             float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
+             float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
+                              * smoothstep(0.55, 1.75, waterDepth)
+                              * (1.0 - smoothstep(4.8, 8.2, waterDepth));
+             vec3 darkCoralReef = mix(vec3(0.008, 0.052, 0.082), vec3(0.018, 0.115, 0.135), reefDetail);
+             waterBody = mix(waterBody, darkCoralReef, reefPatch * 0.82);
+
+             finalColor = mix(waterBody * waveRipple, outgoingLight, physFresnel);
 
              // 3. Warm Golden Sunlight Shimmer Path across the waves
              vec3 halfVec = normalize(sunDirN + viewDir);
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
-             float sunGlintCore = pow(NdotH, 240.0) * 2.4;
-             float sunGlintPath = pow(NdotH, 36.0) * 0.30;
+             float sunGlintCore = pow(NdotH, 240.0) * 2.5;
+             float sunGlintPath = pow(NdotH, 32.0) * 0.34;
              finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
 
-             // 4. Delicate Lacy Shoreline Wave-Lap Foam (strictly 0.04m - 0.55m at the sand contact, zero milky sheet!)
-             float foamNoise = wFbm(worldPosition.xz * 0.65 + vec2(time * 0.5, -time * 0.35));
-             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 5.0 + foamNoise * 3.0);
-             float shoreLace = smoothstep(0.55, 0.06, waterDepth)
+             // 4. Crisp White Shoreline Swash Lace (0.04m..0.62m) + Reef-Crest Breaker Wisps (0.8m..2.4m) — Zero Milky Patina!
+             float foamNoise = wFbm(worldPosition.xz * 0.62 + vec2(time * 0.48, -time * 0.34));
+             float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);
+             float shoreLace = smoothstep(0.62, 0.06, waterDepth)
                              * smoothstep(0.0, 0.05, waterDepth)
-                             * smoothstep(0.45, 0.80, foamNoise * 0.7 + lapWave * 0.45);
-             finalColor = mix(finalColor, vec3(0.95, 0.98, 1.0), shoreLace * 0.48);
+                             * smoothstep(0.42, 0.78, foamNoise * 0.68 + lapWave * 0.46);
 
-             // 5. Beer-Lambert Crystal Transparency at the Beach -> Solid Opaque in Deep Ocean
-             float opticalAlpha = 1.0 - exp(-waterDepth * 0.38);
-             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(4.5, 11.0, waterDepth)), 0.0, alpha);
-             distAlpha = max(distAlpha, shoreLace * 0.55) * maskFade;
+             float breakerWave = 0.5 + 0.5 * sin(waterDepth * 5.2 - time * 3.4 + reefDetail * 4.5);
+             float reefBreaker = smoothstep(2.4, 1.45, waterDepth)
+                               * smoothstep(0.75, 1.35, waterDepth)
+                               * smoothstep(0.62, 0.86, foamNoise * 0.55 + breakerWave * 0.50)
+                               * (0.45 + 0.55 * reefPatch);
+
+             float surfWhite = clamp(shoreLace * 0.68 + reefBreaker * 0.52, 0.0, 0.85);
+             finalColor = mix(finalColor, vec3(0.96, 0.99, 1.0), surfWhite);
+
+             // 5. Beer-Lambert Crystal Transparency at Wet Sand -> Rich Opaque Lagoon/Ocean
+             float opticalAlpha = 1.0 - exp(-waterDepth * 0.52);
+             distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(3.2, 8.5, waterDepth)), 0.0, alpha);
+             distAlpha = max(distAlpha, surfWhite * 0.72) * maskFade;
 
              // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
              float rAtlantisW = length(worldPosition.xz);
@@ -541,11 +564,11 @@ function init() {
     water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
     water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
-    // Panoramic Spawn on the Central Island Terrace:
-    // Facing -Z shows Il Monte Sacro rising on the left, the Inner Harbor & Grand Canal straight ahead,
-    // all 3 Concentric Water & Land Rings, and the encircling Ring of Mist on the horizon!
-    const startX = 46;
-    const startZ = 72;
+    // Panoramic Spawn on Cleito's Seaward Sanctuary Terrace:
+    // Overlooks the turquoise Coral Lagoon & living coral reefs, all 3 sculpted Concentric Rings,
+    // Il Grande Canale di Cleito slicing out to the open ocean, and the shimmering golden sun path!
+    const startX = 34;
+    const startZ = -72;
     const testPos = new THREE.Vector3(startX, 220, startZ);
 
     // Auto-load custom map from Level Editor before initial chunk generation so custom terrain builds immediately
@@ -560,15 +583,22 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
-    // Build initial chunks around start position immediately across the Central Island & 1st Ring
+    // Build initial chunks around start position immediately across Cleito's Sanctuary & Inner Lagoon
     terrain.updateChunksAroundPlayer(testPos, 1050, 340);
 
-    // Initialize 512x512 high-precision bathymetry depth texture (2304m x 2304m centered on Atlantis)
+    // Initialize 512x512 high-precision bathymetry depth texture (2304m x 2304m centered on Cleito)
     heightmapData = new Uint8Array(512 * 512);
     updateHeightmap();
 
     const groundY = terrain.getSurfaceHeight(testPos, 250.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
+    camera.rotation.set(-0.11, 0.16, 0, 'YXZ');
+
+    // Center initial shadow frustum on Cleito spawn terrace
+    lastShadowSnapX = Math.round(startX / 16) * 16;
+    lastShadowSnapZ = Math.round(startZ / 16) * 16;
+    dirLight.target.position.set(lastShadowSnapX, 126, lastShadowSnapZ);
+    dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 360);
 
     // 7. Player Controls (First Person) Setup
     controls = new PointerLockControls(camera, document.body);
@@ -2168,10 +2198,25 @@ function animate() {
         sky.material.uniforms['uTime'].value += delta;
     }
 
-    // 5e. Update active terrain chunks and center sky dome on the player
+    // 5e. Update active terrain chunks, snap shadow frustum when moving/streaming, and center sky dome
     if (terrain) {
         const dynamicRenderDist = Math.min(1250.0, 1000.0 + altFactor * 250.0); // 1000m on ground, 1250m in orbit
         terrain.updateChunksAroundPlayer(camera.position, dynamicRenderDist);
+
+        if (dirLight && sun) {
+            const dxS = camera.position.x - lastShadowSnapX;
+            const dzS = camera.position.z - lastShadowSnapZ;
+            const curQ = terrain.chunkBuildQueue.length;
+            const queueFinished = (prevShadowQueueLen > 0 && curQ === 0);
+            prevShadowQueueLen = curQ;
+            if (dxS * dxS + dzS * dzS > 576.0 || queueFinished) {
+                lastShadowSnapX = Math.round(camera.position.x / 16) * 16;
+                lastShadowSnapZ = Math.round(camera.position.z / 16) * 16;
+                dirLight.target.position.set(lastShadowSnapX, 126, lastShadowSnapZ);
+                dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 360);
+                renderer.shadowMap.needsUpdate = true;
+            }
+        }
     }
     if (sky) {
         sky.position.copy(camera.position);
@@ -2302,10 +2347,10 @@ function createAtlantisMistRing(scene) {
 // PROCEDURAL ENVIRONMENT GENERATION (PALM TREES, TROPICAL BUSHES & BOULDERS)
 // ==========================================
 function spawnEnvironmentObjects(scene, terrain) {
-    const palmTreesCount = 390;
-    const pineTreesCount = 190;
-    const rocksCount = 180;
-    const bushesCount = 420;
+    const palmTreesCount = 650;
+    const pineTreesCount = 540;
+    const rocksCount = 480;
+    const bushesCount = 920;
     
     // Procedural Coconut Palm Tree generator (seamless curved trunk & lush arching fronds)
     function createPalmTree() {
@@ -3222,7 +3267,7 @@ function spawnEnvironmentObjects(scene, terrain) {
         );
     };
 
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6e6a63, flatShading: false, roughness: 0.90 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x787066, flatShading: false, roughness: 0.88 });
 
     const bushMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
@@ -3308,49 +3353,88 @@ function spawnEnvironmentObjects(scene, terrain) {
         return true;
     }
     
-    // Helper: uniform circular sampling across the Central Sacred Island + all 3 Concentric Land Rings (r = 0 .. 602m)
+    // Helper: uniform circular sampling across Cleito's Central Sanctuary, Lagoon Islets & 3 Concentric Rings
     function sampleAtlantisPoint(maxR) {
         const rad = Math.sqrt(Math.random()) * maxR;
         const ang = Math.random() * Math.PI * 2.0;
         return { wx: Math.cos(ang) * rad, wz: Math.sin(ang) * rad };
     }
 
-    // Spawning loop for Palm Trees (golden beaches & lower coastal slopes across all 3 concentric rings + Inner Harbor)
+    // Ultra-fast analytical pre-filter + localized 3D isosurface lock (~30x faster startup!)
+    const probeVec = new THREE.Vector3();
+    function getFastGroundHeight(wx, wz, minAcceptY, maxAcceptY) {
+        const vx = wx / 3.0;
+        const vz = wz / 3.0;
+        const ivx = Math.round(vx);
+        const ivz = Math.round(vz);
+        probeVec.set(wx, 0, wz);
+        if (!terrain.modifiedColumns.has(`${ivx},${ivz}`)) {
+            const estY = terrain.getEstimatedSurfaceHeight(vx, vz) * 3.0;
+            if (estY < minAcceptY - 3.5 || estY > maxAcceptY + 3.5) return -999.0;
+            return terrain.getSurfaceHeight(probeVec, Math.min(255.0, estY + 7.5));
+        }
+        return terrain.getSurfaceHeight(probeVec, 255.0);
+    }
+
+    const tmpPos = new THREE.Vector3();
+    const tmpScale = new THREE.Vector3();
+    const tmpEuler = new THREE.Euler();
+    const tmpQuat = new THREE.Quaternion();
+
+    function placeSinglePalm(wx, wz, groundHeight) {
+        const y = groundHeight - 0.12;
+        const rotationY = Math.random() * Math.PI * 2;
+        const sc = 0.68 + Math.random() * 0.66;
+
+        tmpPos.set(wx, y, wz);
+        tmpScale.set(sc, sc, sc);
+        tmpQuat.setFromEuler(tmpEuler.set(0, rotationY, 0));
+        const matrix = new THREE.Matrix4().compose(tmpPos, tmpQuat, tmpScale);
+
+        instancedPalmsTrunk.setMatrixAt(treesPlaced, matrix);
+        instancedPalmsLeaves.setMatrixAt(treesPlaced, matrix);
+        instancedPalmsCoconuts.setMatrixAt(treesPlaced, matrix);
+
+        palmInstances.push({
+            x: wx,
+            y: y,
+            z: wz,
+            rotationY: rotationY,
+            scale: sc,
+            velocityY: 0,
+            falling: false
+        });
+
+        spawnedPositions.push({ x: wx, z: wz });
+        treesPlaced++;
+    }
+
+    // Spawning loop for Clustered Coconut Palm Groves (beaches, lagoon islets & coastal slopes of Cleito)
     let attempts = 0;
     let treesPlaced = 0;
-    while (treesPlaced < palmTreesCount && attempts < 5200) {
+    while (treesPlaced < palmTreesCount && attempts < 7200) {
         attempts++;
-        const maxR = (treesPlaced < palmTreesCount * 0.30) ? 265.0 : 598.0;
+        const maxR = (treesPlaced < palmTreesCount * 0.36) ? 275.0 : 605.0;
         const { wx, wz } = sampleAtlantisPoint(maxR);
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+        const groundHeight = getFastGroundHeight(wx, wz, 120.35, 143.5);
 
-        // Spawn range: between 120.4m (beaches) and 136.5m (coastal terraces), keeping natural grove spacing
-        if (groundHeight > 120.4 && groundHeight < 136.5 && isFarEnough(wx, wz, 4.0)) {
-            const y = groundHeight - 0.1;
-            const rotationY = Math.random() * Math.PI * 2;
-            const sc = 0.78 + Math.random() * 0.52;
+        if (groundHeight > 120.35 && groundHeight < 143.5 && isFarEnough(wx, wz, 3.6)) {
+            placeSinglePalm(wx, wz, groundHeight);
 
-            const position = new THREE.Vector3(wx, y, wz);
-            const scale = new THREE.Vector3(sc, sc, sc);
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
-            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
-
-            instancedPalmsTrunk.setMatrixAt(treesPlaced, matrix);
-            instancedPalmsLeaves.setMatrixAt(treesPlaced, matrix);
-            instancedPalmsCoconuts.setMatrixAt(treesPlaced, matrix);
-
-            palmInstances.push({
-                x: wx,
-                y: y,
-                z: wz,
-                rotationY: rotationY,
-                scale: sc,
-                velocityY: 0,
-                falling: false
-            });
-
-            spawnedPositions.push({ x: wx, z: wz });
-            treesPlaced++;
+            // Natural tropical palm grove clustering: 45% chance to sprout 1-2 companion palms nearby!
+            if (treesPlaced < palmTreesCount && Math.random() < 0.45) {
+                const companions = (Math.random() < 0.45) ? 2 : 1;
+                for (let c = 0; c < companions && treesPlaced < palmTreesCount; c++) {
+                    const cAng = Math.random() * Math.PI * 2;
+                    const cDist = 3.2 + Math.random() * 2.8;
+                    const cx = wx + Math.cos(cAng) * cDist;
+                    const cz = wz + Math.sin(cAng) * cDist;
+                    const ch = getFastGroundHeight(cx, cz, 120.35, 143.5);
+                    if (ch > 120.35 && ch < 143.5 && isFarEnough(cx, cz, 2.9)) {
+                        placeSinglePalm(cx, cz, ch);
+                    }
+                }
+            }
         }
     }
     instancedPalmsTrunk.count = treesPlaced;
@@ -3361,25 +3445,25 @@ function spawnEnvironmentObjects(scene, terrain) {
     attempts = 0;
     let pinesAPlaced = 0;
     let pinesBPlaced = 0;
-    while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 4500) {
+    while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 8500) {
         attempts++;
-        const { wx, wz } = sampleAtlantisPoint(595.0);
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+        const maxR = ((pinesAPlaced + pinesBPlaced) < pineTreesCount * 0.34) ? 275.0 : 598.0;
+        const { wx, wz } = sampleAtlantisPoint(maxR);
+        const groundHeight = getFastGroundHeight(wx, wz, 122.0, 186.0);
 
-        // Spawn broadleaf trees on verdant ring ridges & Sacred Mountain lower/mid slopes (124.5m up to 176.0m)
-        if (groundHeight >= 124.5 && groundHeight < 176.0 && isFarEnough(wx, wz, 5.2)) {
-            const y = groundHeight - 0.15;
+        // Clothe Cleito's concentric rings, coves & Sacred Mountain slopes (122.0m up to 186.0m) in lush jungle canopy
+        if (groundHeight >= 122.0 && groundHeight < 186.0 && isFarEnough(wx, wz, 4.2)) {
+            const y = groundHeight - 0.16;
             const rotationY = Math.random() * Math.PI * 2;
-            const scXZ = 0.82 + Math.random() * 0.46;
-            const scY  = scXZ * (0.90 + Math.random() * 0.22);
+            const scXZ = 0.80 + Math.random() * 0.52;
+            const scY  = scXZ * (0.90 + Math.random() * 0.24);
 
-            const position = new THREE.Vector3(wx, y, wz);
-            const scale = new THREE.Vector3(scXZ, scY, scXZ);
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0));
-            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+            tmpPos.set(wx, y, wz);
+            tmpScale.set(scXZ, scY, scXZ);
+            tmpQuat.setFromEuler(tmpEuler.set(0, rotationY, 0));
+            const matrix = new THREE.Matrix4().compose(tmpPos, tmpQuat, tmpScale);
 
-            // Use taller Rainforest Species B preferentially on higher inland hills (>138m) or alternate naturally
-            const wantSpeciesB = (groundHeight > 140.0 || Math.random() < 0.42) && (pinesBPlaced < speciesBCount);
+            const wantSpeciesB = (groundHeight > 136.0 || Math.random() < 0.44) && (pinesBPlaced < speciesBCount);
             const useB = wantSpeciesB || (pinesAPlaced >= speciesACount);
 
             if (useB && pinesBPlaced < speciesBCount) {
@@ -3416,24 +3500,27 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedPinesBTrunk.count = pinesBPlaced;
     instancedPinesBFoliage.count = pinesBPlaced;
 
-    // Spawning loop for Lush Tropical Fern & Shrub Rosettes across all 3 concentric rings
+    // Spawning loop for Lush Tropical Ferns & Coastal Dune Shrubs (heavily feathering the 120.85m..128.5m beach-grass edge!)
     attempts = 0;
     let bushesPlaced = 0;
-    while (bushesPlaced < bushesCount && attempts < 4500) {
+    while (bushesPlaced < bushesCount && attempts < 9500) {
         attempts++;
-        const { wx, wz } = sampleAtlantisPoint(598.0);
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
-        if (groundHeight >= 121.4 && groundHeight < 168.0) {
+        const maxR = (bushesPlaced < bushesCount * 0.38) ? 280.0 : 602.0;
+        const { wx, wz } = sampleAtlantisPoint(maxR);
+        // First 55% of shrubs concentrate right along the dune-scrub transition (120.85m .. 129.0m) for a 3D feathered beach edge!
+        const maxBushY = (bushesPlaced < bushesCount * 0.55) ? 129.0 : 174.0;
+        const groundHeight = getFastGroundHeight(wx, wz, 120.85, maxBushY);
+        if (groundHeight >= 120.85 && groundHeight < maxBushY) {
             const y = groundHeight - 0.08;
-            const scX = 0.75 + Math.random() * 0.75;
-            const scY = 0.70 + Math.random() * 0.65;
+            const coastalScale = (groundHeight < 124.5) ? (0.62 + Math.random() * 0.55) : (0.80 + Math.random() * 0.78);
+            const scX = coastalScale;
+            const scY = coastalScale * (0.82 + Math.random() * 0.34);
             const scZ = scX * (0.9 + Math.random() * 0.2);
             const rotY = Math.random() * Math.PI * 2;
-            const matrix = new THREE.Matrix4().compose(
-                new THREE.Vector3(wx, y, wz),
-                new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0)),
-                new THREE.Vector3(scX, scY, scZ)
-            );
+            tmpPos.set(wx, y, wz);
+            tmpQuat.setFromEuler(tmpEuler.set(0, rotY, 0));
+            tmpScale.set(scX, scY, scZ);
+            const matrix = new THREE.Matrix4().compose(tmpPos, tmpQuat, tmpScale);
             instancedBushes.setMatrixAt(bushesPlaced, matrix);
             bushInstances.push({
                 x: wx, y: y, z: wz,
@@ -3447,27 +3534,29 @@ function spawnEnvironmentObjects(scene, terrain) {
     instancedBushes.instanceMatrix.needsUpdate = true;
     instancedBushes.matrixAutoUpdate = false;
 
-    // Spawning loop for Weathered Boulders (along shores, canal banks & Sacred Mountain slopes)
+    // Spawning loop for Chiseled Coastal Headland & Crag Boulders (concentrated on rocky shores & high crags)
     attempts = 0;
     let rocksPlaced = 0;
-    while (rocksPlaced < rocksCount && attempts < 3200) {
+    while (rocksPlaced < rocksCount && attempts < 7500) {
         attempts++;
-        const { wx, wz } = sampleAtlantisPoint(625.0);
-        const groundHeight = terrain.getSurfaceHeight(new THREE.Vector3(wx, 0, wz), 255.0);
+        const { wx, wz } = sampleAtlantisPoint(640.0);
+        const groundHeight = getFastGroundHeight(wx, wz, 118.8, 212.0);
+        const isShoreOrCrag = (groundHeight > 118.8 && groundHeight < 125.2) || (groundHeight > 136.0) || (Math.random() < 0.22);
 
-        if (groundHeight > 112.0 && groundHeight < 205.0 && isFarEnough(wx, wz, 4.0)) {
-            const y = groundHeight - 0.25;
-            const scaleX = 0.8 + Math.random() * 1.0;
-            const scaleY = 0.5 + Math.random() * 0.7;
-            const scaleZ = 0.8 + Math.random() * 1.0;
+        if (groundHeight > 118.8 && groundHeight < 212.0 && isShoreOrCrag && isFarEnough(wx, wz, 3.4)) {
+            const y = groundHeight - 0.28;
+            const bigOutcrop = (groundHeight < 123.5 || groundHeight > 142.0) ? (1.05 + Math.random() * 1.15) : (0.75 + Math.random() * 0.75);
+            const scaleX = bigOutcrop * (0.85 + Math.random() * 0.45);
+            const scaleY = bigOutcrop * (0.55 + Math.random() * 0.55);
+            const scaleZ = bigOutcrop * (0.85 + Math.random() * 0.45);
             const rotX = Math.random() * Math.PI;
             const rotY = Math.random() * Math.PI;
             const rotZ = Math.random() * Math.PI;
 
-            const position = new THREE.Vector3(wx, y, wz);
-            const scale = new THREE.Vector3(scaleX, scaleY, scaleZ);
-            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, rotZ));
-            const matrix = new THREE.Matrix4().compose(position, rotation, scale);
+            tmpPos.set(wx, y, wz);
+            tmpScale.set(scaleX, scaleY, scaleZ);
+            tmpQuat.setFromEuler(tmpEuler.set(rotX, rotY, rotZ));
+            const matrix = new THREE.Matrix4().compose(tmpPos, tmpQuat, tmpScale);
 
             instancedRocks.setMatrixAt(rocksPlaced, matrix);
 
