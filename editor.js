@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { VoxelTerrain } from "./marching_cubes.js?v=0.212";
-import { createAtlantisCapital } from "./atlantis_capital.js?v=0.212";
-import { WorldRealismSystem } from "./world_realism.js?v=0.212";
+import { VoxelTerrain } from "./marching_cubes.js?v=0.213";
+import { createAtlantisCapital } from "./atlantis_capital.js?v=0.213";
+import { WorldRealismSystem } from "./world_realism.js?v=0.213";
 
 // ==========================================
 // EDITOR GAMEPLAY STATE & GLOBALS
@@ -632,7 +632,7 @@ function setupEvents() {
             quickPlay();
         }
 
-        // Fast Travel to Key Planetary Hubs: F6 / F7 / F8
+        // Fast Travel to Key Planetary Hubs: F6 / F7 / F8 / F9
         if (e.code === "F6") {
             e.preventDefault();
             window.teleportEditorToRegion("tigris");
@@ -642,6 +642,9 @@ function setupEvents() {
         } else if (e.code === "F8") {
             e.preventDefault();
             window.teleportEditorToRegion("atlantis");
+        } else if (e.code === "F9") {
+            e.preventDefault();
+            window.teleportEditorToRegion("borgosesia");
         } else if (e.code === "KeyN" && worldRealism) {
             const tInfo = worldRealism.advanceTimeHours(3.0);
             showToast(`Ciclo Giorno/Notte: ${tInfo.text} (${tInfo.label})`);
@@ -957,6 +960,10 @@ window.teleportEditorToRegion = function(regionKey) {
         atlantis: {
             x: -10722.0, y: 215.0, z: -10845.0, yaw: 0.42, pitch: -0.24,
             label: "👑 CLEITO — CAPITALE DI ATLANTIDE (Centro Oceano Atlantico)"
+        },
+        borgosesia: {
+            x: 2950.0, y: 174.0, z: -15275.0, yaw: 0.72, pitch: -0.20,
+            label: "🌲 BORGOSESIA — VALSESIA, FIUME SESIA & MONTE ROSA (Piemonte, Italia)"
         }
     };
     const dest = destinations[regionKey] || destinations.tigris;
@@ -1802,10 +1809,11 @@ let compassCardinalEls = [];
 let compassPoiEls = [];
 
 const EDITOR_COMPASS_POIS = [
-    { key: "tigris",    icon: "🔥", label: "Tigri/Eufrate", x: 14200.0,  z: -13775.0 },
-    { key: "ararat",    icon: "🏔️", label: "M. Ararat",     x: 14755.0,  z: -14325.0 },
-    { key: "gibraltar", icon: "🏛️", label: "Gibilterra",    x: -2100.0,  z: -12520.0 },
-    { key: "atlantis",  icon: "👑", label: "Atlantide",     x: -10800.0, z: -10600.0 }
+    { key: "tigris",     icon: "🔥", label: "Tigri/Eufrate", x: 14200.0,  z: -13775.0 },
+    { key: "ararat",     icon: "🏔️", label: "M. Ararat",     x: 14755.0,  z: -14325.0 },
+    { key: "borgosesia", icon: "🌲", label: "Borgosesia",    x: 2950.0,   z: -15300.0 },
+    { key: "gibraltar",  icon: "🏛️", label: "Gibilterra",    x: -2100.0,  z: -12520.0 },
+    { key: "atlantis",   icon: "👑", label: "Atlantide",     x: -10800.0, z: -10600.0 }
 ];
 
 function initEditorCompass() {

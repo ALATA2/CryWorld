@@ -625,8 +625,9 @@ export class VoxelTerrain {
         this.chunksY = this.maxChunkY - this.minChunkY;
 
         // Planetary Earth-like Generation Variables (Fully Configurable — Lunar-Scale Globe R = 1800 km)
-        this.atlantisCenter = { x: -10800.0, z: -10600.0 }; // Center of the North Atlantic Ocean
-        this.tigrisSpawn    = { x:  14200.0, z: -13800.0 }; // Headwaters of the Tigris & Euphrates (Armenian Highland / Mount Ararat)
+        this.atlantisCenter   = { x: -10800.0, z: -10600.0 }; // Center of the North Atlantic Ocean
+        this.tigrisSpawn      = { x:  14200.0, z: -13800.0 }; // Headwaters of the Tigris & Euphrates (Armenian Highland / Mount Ararat)
+        this.borgosesiaCenter = { x:   2950.0, z: -15300.0 }; // Borgosesia — Valsesia, Sesia River & Monte Rosa (Piemonte, Italy)
         this.planetaryConfig = {
             planetRadiusKm: 1800,           // Planet radius in kilometers (Lunar scale!)
             equatorZ: 0,                    // Z-coordinate of Equator
@@ -766,8 +767,9 @@ export class VoxelTerrain {
                  float wetZone = smoothstep(121.25, 119.95, wy);
                  vec3 sandCol = mix(drySand, drySand * vec3(0.48, 0.45, 0.40), wetZone);
 
-                 float rAtlantis = length(vMCWorldPos.xz - vec2(-10800.0, -10600.0));
-                 float rTigris   = length(vMCWorldPos.xz - vec2(14200.0, -13800.0));
+                 float rAtlantis   = length(vMCWorldPos.xz - vec2(-10800.0, -10600.0));
+                 float rTigris     = length(vMCWorldPos.xz - vec2(14200.0, -13800.0));
+                 float rBorgosesia = length(vMCWorldPos.xz - vec2(2950.0, -15300.0));
 
                  // 4. Continuous Seamless Shading from Coral Reef (< 120m) -> Soft Dune Scrub -> Lush Green Hills (ZERO sharp line!)
                  if (wy < 120.0) {
@@ -793,12 +795,13 @@ export class VoxelTerrain {
                      vec3 duneScrubCol = mix(vec3(0.22, 0.29, 0.075), vegCol, 0.68);
                      vec3 sandToScrub  = mix(sandCol, duneScrubCol, clamp(scrubBlend * 0.78 + tuftPatches * 0.55, 0.0, 1.0));
 
-                     // Stage B: Pioneer dune scrub -> full lush emerald tropical/fertile canopy turf across Cleito & Mesopotamia!
+                     // Stage B: Pioneer dune scrub -> full lush emerald tropical/fertile canopy turf across Cleito, Mesopotamia & Borgosesia!
                      float fullVegBlend = smoothstep(123.2, 128.2, effCoastalY);
                      float inCleito = 1.0 - smoothstep(4600.0, 5200.0, rAtlantis);
                      float inMesopotamia = (1.0 - smoothstep(3800.0, 4800.0, rTigris)) * (1.0 - smoothstep(178.0, 198.0, wy));
+                     float inBorgosesia = (1.0 - smoothstep(2600.0, 3300.0, rBorgosesia)) * (1.0 - smoothstep(178.0, 198.0, wy));
                      float isTropicalOrForest = smoothstep(0.04, 0.24, diffuseColor.g - diffuseColor.r * 0.65);
-                     float coastalTropical = max(max(inCleito, inMesopotamia), max(isTropicalOrForest, 1.0 - smoothstep(127.0, 136.0, wy)));
+                     float coastalTropical = max(max(inCleito, max(inMesopotamia, inBorgosesia)), max(isTropicalOrForest, 1.0 - smoothstep(127.0, 136.0, wy)));
                      vec3 inlandSurface = mix(diffuseColor.rgb * (0.85 + 0.30 * nMed), vegCol, coastalTropical * 0.96);
 
                      vec3 organicGround = mix(sandToScrub, inlandSurface, fullVegBlend);
@@ -1219,6 +1222,108 @@ export class VoxelTerrain {
         return { weight, hill, carve };
     }
 
+    // =========================================================
+    // BORGOSESIA — VALSESIA, FIUME SESIA, MONTE ROSA & MONTE FENERA (PIEMONTE, ITALIA)
+    // High-resolution analytical terrain sculpting around (worldX = 2950, worldZ = -15300)
+    // =========================================================
+    getBorgosesiaRegion(x, z) {
+        const borgoVX = 983.33333333; // 2950.0m / 3.0
+        const borgoVZ = -5100.0;      // -15300.0m / 3.0
+        const bx = x - borgoVX;
+        const bz = z - borgoVZ;
+
+        // Fast bounding-box exit so this costs 0 CPU outside Valsesia / Piemonte
+        if (Math.abs(bx) > 950.0 || Math.abs(bz) > 950.0) {
+            return { weight: 0.0, hill: 0.0, carve: 0.0 };
+        }
+
+        const roll1 = 0.5 + 0.5 * this.noise.noise2d(x * 0.0072 - 2.1, z * 0.0072 + 4.3);
+        const roll2 = 0.5 + 0.5 * this.noise.noise2d(x * 0.016 + 3.8, z * 0.016 - 1.9);
+        const gentleRoll = roll1 * 0.75 + roll2 * 0.25;
+
+        const regionDist = Math.sqrt(bx * bx + bz * bz);
+        const regionFade = 1.0 - Math.min(1.0, Math.max(0.0, (regionDist - 540.0) / 260.0));
+        if (regionFade <= 0.0) {
+            return { weight: 0.0, hill: 0.0, carve: 0.0 };
+        }
+
+        const sRegion = regionFade * regionFade * (3.0 - 2.0 * regionFade);
+        let weight = 0.96 * sRegion;
+        // Verdant Valsesia floor rising gently northwestward toward Alagna & Monte Rosa
+        const alpineRise = Math.max(0.0, Math.min(1.0, (220.0 - (bx * 0.55 + bz * 0.83)) / 420.0));
+        const sAlpine = alpineRise * alpineRise * (3.0 - 2.0 * alpineRise);
+        let hill = (6.4 + gentleRoll * 2.3 + sAlpine * 2.8) * sRegion;
+
+        const addMountainMassif = (mx, mz, radX, radZ, peakH) => {
+            const dx = (bx - mx) / radX;
+            const dz = (bz - mz) / radZ;
+            const d = Math.sqrt(dx * dx + dz * dz);
+            if (d >= 1.0) return;
+            const dome = 0.5 + 0.5 * Math.cos(d * Math.PI);
+            const ridgeDetail = 0.88 + 0.12 * this.noise.noise2d(x * 0.012, z * 0.012);
+            weight = Math.max(weight, 0.98);
+            hill = Math.max(hill, 8.8 + peakH * dome * ridgeDetail);
+        };
+
+        // 1. MASSICCIO DEL MONTE ROSA (Punta Dufour / Capanna Margherita Y ≈ 254m & Corno Bianco Y ≈ 225m to the NW)
+        addMountainMassif(-175.0, -180.0, 175.0, 160.0, 41.0); // Monte Rosa (Punta Dufour / Gnifetti)
+        addMountainMassif(-265.0,  -75.0, 135.0, 125.0, 29.5); // Corno Bianco & Alta Valsesia
+        addMountainMassif( -55.0, -245.0, 145.0, 130.0, 28.0); // Cima di Jazzi / Macugnaga ridge
+
+        // 2. ALPI VALSESIANE & ALPE DI MERA / SACRO MONTE DI VARALLO (Flanking the valley to the N/NE and W/SW)
+        addMountainMassif( 155.0, -150.0, 145.0, 135.0, 25.5); // Monte Barone / Alpe Noveis / Cusio ridge
+        addMountainMassif(-220.0,   95.0, 140.0, 150.0, 22.0); // Alpe di Mera / Monte Camparient
+
+        // 3. MONTE FENERA (Iconic natural park mountain overlooking Borgosesia to the East/Southeast, Y ≈ 195m)
+        addMountainMassif( 185.0,   75.0, 130.0, 140.0, 21.5);
+
+        // 4. CONCA VERDE DI BORGOSESIA (Smooth riverside valley terrace at bx = 0, bz = 8.33 -> worldX = 2950, worldZ = -15275)
+        const dBorgo = Math.sqrt(bx * bx + (bz - 8.0) * (bz - 8.0));
+        if (dBorgo < 52.0) {
+            const tPlat = 1.0 - dBorgo / 52.0;
+            const sPlat = tPlat * tPlat * (3.0 - 2.0 * tPlat);
+            hill = hill * (1.0 - 0.68 * sPlat) + 8.6 * (0.68 * sPlat);
+        }
+
+        // 5. FIUME SESIA: Crystal-clear alpine river descending from the Monte Rosa glacier (NW)
+        // curving right alongside Borgosesia (bx ≈ -32, bz ≈ 0) and flowing southward toward the Po Valley!
+        let carve = 0.0;
+        const riverFloorW = 0.72;
+        const riverFloorH = 4.45;
+
+        if (bz >= -135.0 && bz <= 680.0) {
+            const zProg = (bz + 135.0) / 815.0;
+            const sesiaMeander = Math.sin(bz * 0.016 + 0.5) * 22.0 + Math.cos(bz * 0.033) * 8.0;
+            // Curves from (-115, -135) at the foot of Monte Rosa, passes at x = -34 beside Borgosesia (bz = 0), then flows SE
+            const sesiaCenterX = -34.0 + (bz * 0.22) + sesiaMeander * Math.min(1.0, Math.max(0.25, zProg * 2.0));
+            const dSpringSesia = Math.sqrt((bx + 92.0) * (bx + 92.0) + (bz + 95.0) * (bz + 95.0));
+            const dChannel = Math.abs(bx - sesiaCenterX);
+            const dRiver = Math.min(dChannel, dSpringSesia * 0.85);
+
+            const riverHalfWater = 12.0 + Math.max(0.0, zProg) * 5.0;
+            const bankWidth = 16.0;
+
+            if (dRiver < riverHalfWater + bankWidth) {
+                if (dRiver <= riverHalfWater) {
+                    carve = 1.0;
+                } else {
+                    const tBank = (dRiver - riverHalfWater) / bankWidth;
+                    carve = 0.5 + 0.5 * Math.cos(tBank * Math.PI);
+                }
+                const startFade = Math.min(1.0, Math.max(0.0, (bz + 135.0) / 24.0));
+                const endFade = 1.0 - Math.min(1.0, Math.max(0.0, (bz - 560.0) / 120.0));
+                carve *= startFade * endFade;
+            }
+        }
+
+        if (carve > 0.0) {
+            weight = weight * (1.0 - carve) + riverFloorW * carve;
+            hill = hill * (1.0 - carve) + riverFloorH * carve;
+        }
+
+        return { weight, hill, carve };
+    }
+
     getDensity(x, y, z) {
         // Out of bounds voxels are empty air
         if (y < this.minY || y >= this.maxY) {
@@ -1401,7 +1506,49 @@ export class VoxelTerrain {
             return _tempBiomeInfo;
         }
 
-        // 3. FAMOUS EARTH LANDMARKS (Colonne d'Ercole / Gibilterra, Mar Mediterraneo, Nilo)
+        // 3. BORGOSESIA — VALSESIA, FIUME SESIA & MONTE ROSA (PIEMONTE, ITALIA: X = 2950, Z = -15300)
+        const bx = worldX - 2950.0;
+        const bz = worldZ - (-15300.0);
+        if (Math.abs(bx) < 2200.0 && Math.abs(bz) < 2200.0) {
+            const dMonteRosa = Math.sqrt((bx + 525.0) * (bx + 525.0) + (bz + 540.0) * (bz + 540.0));
+            if (dMonteRosa < 620.0 && wy >= 162.0) {
+                if (wy >= 205.0) {
+                    _tempBiomeInfo.type = 'summit_glacier';
+                    _tempBiomeInfo.name = '🏔️ MASSICCIO DEL MONTE ROSA — PUNTA DUFOUR (ALPI VALSESIANE)';
+                    _tempBiomeInfo.isGlacier = true;
+                } else {
+                    _tempBiomeInfo.type = 'mountain';
+                    _tempBiomeInfo.name = '⛰️ PENDII DEL MONTE ROSA (ALTA VALSESIA)';
+                    _tempBiomeInfo.isMountain = true;
+                }
+                return _tempBiomeInfo;
+            }
+            if (wy <= 122.8) {
+                _tempBiomeInfo.type = 'lagoon_atoll';
+                _tempBiomeInfo.name = '🌊 FIUME SESIA — BORGOSESIA (VALSESIA, PIEMONTE)';
+                return _tempBiomeInfo;
+            }
+            if (Math.sqrt(bx * bx + (bz - 25.0) * (bz - 25.0)) < 380.0) {
+                _tempBiomeInfo.type = 'alpine';
+                _tempBiomeInfo.name = '🌲 BORGOSESIA — CONCA DELLA VALSESIA (PIEMONTE, ITALIA)';
+                _tempBiomeInfo.isAlpine = true;
+                return _tempBiomeInfo;
+            }
+            if (wy >= 162.0) {
+                _tempBiomeInfo.type = 'mountain';
+                _tempBiomeInfo.name = (bx > 150.0)
+                    ? '⛰️ PARCO NATURALE DEL MONTE FENERA (BORGOSESIA)'
+                    : '⛰️ ALPI VALSESIANE & ALPE DI MERA (PIEMONTE)';
+                _tempBiomeInfo.isMountain = true;
+                return _tempBiomeInfo;
+            }
+            _tempBiomeInfo.type = 'forest';
+            _tempBiomeInfo.name = '🌲 VALSESIA — BORGOSESIA & VARALLO (PIEMONTE, ITALIA)';
+            _tempBiomeInfo.isForest = true;
+            return _tempBiomeInfo;
+        }
+
+        // 4. FAMOUS EARTH LANDMARKS (Colonne d'Ercole / Gibilterra, Mar Mediterraneo, Nilo)
         if (Math.hypot(worldX - (-2100.0), worldZ - (-12750.0)) < 1850.0) {
             _tempBiomeInfo.type = 'lagoon_atoll';
             _tempBiomeInfo.name = '🏛️ COLONNE D\'ERCOLE (STRETTO DI GIBILTERRA)';
@@ -1517,19 +1664,29 @@ export class VoxelTerrain {
 
         // 2. High-resolution analytical sculpting for the Tigris & Euphrates Headwaters, Mount Ararat & Mesopotamia
         const tigris = this.getTigrisEuphratesRegion(x, z);
-        if (tigris.weight <= 0.0 && tigris.carve <= 0.0) {
+        // 3. High-resolution analytical sculpting for Borgosesia, Fiume Sesia & Monte Rosa (Valsesia, Italy)
+        const borgo = this.getBorgosesiaRegion(x, z);
+
+        if (tigris.weight <= 0.0 && tigris.carve <= 0.0 && borgo.weight <= 0.0 && borgo.carve <= 0.0) {
             return earth;
         }
 
-        let weight = Math.max(earth.weight, tigris.weight);
-        let hill = Math.max(earth.hill * 0.55, tigris.hill);
+        let weight = Math.max(earth.weight, tigris.weight, borgo.weight);
+        let hill = earth.hill;
+        if (tigris.weight > 0.0 || tigris.carve > 0.0) {
+            hill = Math.max(earth.hill * 0.55, tigris.hill);
+        }
+        if (borgo.weight > 0.0 || borgo.carve > 0.0) {
+            hill = Math.max(earth.hill * 0.45, borgo.hill);
+        }
 
-        // Preserve navigable turquoise river channels & springs carved into the Mesopotamian landmass
-        if (tigris.carve > 0.0) {
+        // Preserve navigable turquoise river channels & springs carved into Mesopotamia or Valsesia (Fiume Sesia)
+        const activeCarve = Math.max(tigris.carve, borgo.carve);
+        if (activeCarve > 0.0) {
             const riverW = 0.72;
             const riverH = 4.45;
-            weight = weight * (1.0 - tigris.carve) + riverW * tigris.carve;
-            hill = hill * (1.0 - tigris.carve) + riverH * tigris.carve;
+            weight = weight * (1.0 - activeCarve) + riverW * activeCarve;
+            hill = hill * (1.0 - activeCarve) + riverH * activeCarve;
         }
 
         return { weight, hill };
@@ -1556,12 +1713,15 @@ export class VoxelTerrain {
         let maxWeight = cont.weight;
         let maxHill = cont.hill;
 
-        // Suppress random cellular sea-crags near the 10 Surrounding Islands of Atlantis (distAtlantis < 1680)
-        // and inside the Tigris & Euphrates / Mesopotamia Cradle so rivers and beaches remain pure and realistic!
+        // Suppress random cellular sea-crags near the 10 Surrounding Islands of Atlantis (distAtlantis < 1680),
+        // inside the Tigris & Euphrates / Mesopotamia Cradle, and around Borgosesia / Valsesia!
         const tx = x - 4733.33333333;
         const tz = z - (-4600.0);
         const distTigris = Math.sqrt(tx * tx + tz * tz);
-        if (distAtlantis < 1680.0 || distTigris < 1350.0) {
+        const bx = x - 983.33333333;
+        const bz = z - (-5100.0);
+        const distBorgo = Math.sqrt(bx * bx + bz * bz);
+        if (distAtlantis < 1680.0 || distTigris < 1350.0 || distBorgo < 950.0) {
             return {
                 weight: maxWeight * startAreaMask,
                 hill: maxHill * startAreaMask
@@ -1882,7 +2042,7 @@ export class VoxelTerrain {
         const smoothWeightAbove = Math.pow(Math.max(0.0, Math.min(1.0, landWeight)), 1.2);
         const smoothWeightBelow = Math.pow(Math.max(0.0, Math.min(1.0, landWeight * 1.5)), 1.2);
 
-        // Inside Cleito/Atlantis (around -3600, -3533.33) AND Tigris/Euphrates/Mesopotamia (around 4733.33, -4600),
+        // Inside Cleito/Atlantis (-3600, -3533.33), Tigris/Euphrates/Mesopotamia (4733.33, -4600), and Borgosesia (983.33, -5100),
         // use ultra-gentle realistic ground swells so all slopes stay natural and silky smooth!
         const ax = x - (-3600.0);
         const az = z - (-3533.33333333);
@@ -1890,9 +2050,13 @@ export class VoxelTerrain {
         const tx = x - 4733.33333333;
         const tz = z - (-4600.0);
         const rTigris = Math.sqrt(tx * tx + tz * tz);
+        const bx = x - 983.33333333;
+        const bz = z - (-5100.0);
+        const rBorgo = Math.sqrt(bx * bx + bz * bz);
         const blendAtlantis = Math.min(1.0, Math.max(0.0, (rAtlantis - 1620.0) / 140.0));
         const blendTigris   = Math.min(1.0, Math.max(0.0, (rTigris - 1320.0) / 140.0));
-        const outerBlend = Math.min(blendAtlantis, blendTigris);
+        const blendBorgo    = Math.min(1.0, Math.max(0.0, (rBorgo - 900.0) / 120.0));
+        const outerBlend = Math.min(blendAtlantis, blendTigris, blendBorgo);
 
         const cleitoBase = 4.0 + this.noise.noise2d(x * 0.0065, z * 0.0065) * 1.10 + this.noise.noise2d(x * 0.018, z * 0.018) * 0.32;
         const outerBase  = 4.0 + this.noise.noise2d(x * 0.022, z * 0.022) * 2.10 + this.noise.noise2d(x * 0.065, z * 0.065) * 0.55;

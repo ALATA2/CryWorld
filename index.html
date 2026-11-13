@@ -755,10 +755,11 @@
             <p style="margin-bottom: 14px; color: #a5c7db; font-size: 0.92rem;">Opzioni di gioco &amp; Viaggio Rapido Planetario</p>
             <div class="confirm-buttons" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
                 <button id="btn-pause-resume" class="play-btn" style="width: 100%; padding: 11px; font-size: 0.95rem; background: linear-gradient(135deg, #00d2ff, #0066ff); box-shadow: 0 4px 15px rgba(0, 150, 255, 0.4);">▶️ RIPRENDI GIOCO</button>
-                <div style="margin: 4px 0 2px 0; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; color: #ffae00; text-transform: uppercase;">🌍 Viaggio Rapido (Tasti F6 / F7 / F8)</div>
+                <div style="margin: 4px 0 2px 0; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; color: #ffae00; text-transform: uppercase;">🌍 Viaggio Rapido (Tasti F6 / F7 / F8 / F9)</div>
                 <button onclick="window.teleportToRegion && window.teleportToRegion('tigris')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(0, 230, 118, 0.16); border: 1.5px solid #00e676; color: #b9f6ca; box-shadow: none;">🏔️ [F6] SORGENTI DEL TIGRI &amp; EUFRATE (Spawn)</button>
                 <button onclick="window.teleportToRegion && window.teleportToRegion('gibraltar')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(255, 174, 0, 0.16); border: 1.5px solid #ffae00; color: #ffe082; box-shadow: none;">🏛️ [F7] COLONNE D'ERCOLE (Stretto di Gibilterra)</button>
                 <button onclick="window.teleportToRegion && window.teleportToRegion('atlantis')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(0, 210, 255, 0.18); border: 1.5px solid #00d2ff; color: #84ffff; box-shadow: none;">👑 [F8] CLEITO — CAPITALE DI ATLANTIDE (Oceano Atlantico)</button>
+                <button onclick="window.teleportToRegion && window.teleportToRegion('borgosesia')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(105, 240, 174, 0.18); border: 1.5px solid #69f0ae; color: #ccff90; box-shadow: none;">🌲 [F9] BORGOSESIA — VALSESIA &amp; MONTE ROSA (Italia)</button>
                 <button id="btn-pause-music" class="play-btn" style="width: 100%; padding: 10px; font-size: 0.9rem; background: rgba(0, 210, 255, 0.15); border: 1.5px solid #00d2ff; color: #80e5ff; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.2);">🎵 MUSICA: ON (Premi M)</button>
                 <button id="btn-confirm-yes" class="confirm-btn yes-btn" style="width: 100%; padding: 9px; font-size: 0.85rem; background: rgba(255, 60, 60, 0.2); border: 1px solid rgba(255, 60, 60, 0.4); color: #ff9999; box-shadow: none;">🚪 TORNA AL MENU</button>
             </div>
@@ -767,7 +768,7 @@
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.212</div>
+        <div id="homepage-version">V 0.213</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
@@ -798,7 +799,7 @@
                     <li><span class="key">Click SX</span> &nbsp; <b>Scava</b> il terreno (Rimuovi voxel)</li>
                     <li><span class="key">Click DX</span> &nbsp; <b>Crea</b> il terreno (Aggiungi voxel)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Cambia equipaggiamento (Hotbar)</li>
-                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide</li>
+                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> <span class="key">F9</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide • Borgosesia</li>
                     <li><span class="key">N</span> &nbsp; Avanza Orario Ciclo Giorno / Notte (+3h)</li>
                     <li><span class="key">M</span> &nbsp; Musica &amp; Suoni Ambientali ON / OFF</li>
                     <li><span class="key">ESC</span> &nbsp; Menu di Pausa / Viaggio Rapido / Uscita</li>
@@ -828,7 +829,7 @@
                 FPS: <span id="fps-counter">60</span>
             </div>
             <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
-                V 0.212
+                V 0.213
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -909,6 +910,6 @@
     </script>
 
     <!-- Game Logic -->
-    <script type="module" src="main.js?v=0.212"></script>
+    <script type="module" src="main.js?v=0.213"></script>
 </body>
 </html>

@@ -976,7 +976,7 @@
             FPS: <span id="fps-counter">60</span>
         </div>
         <div class="hud-card version-card">
-            V 0.212
+            V 0.213
         </div>
         <div class="hud-card altimeter-card" id="altimeter-card">
             ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -988,7 +988,7 @@
 
     <!-- Initial Click-to-Play Blocker Overlay matching Gameplay -->
     <div id="blocker">
-        <div id="homepage-version">V 0.212</div>
+        <div id="homepage-version">V 0.213</div>
         <div id="instructions">
             <h2>LEVEL BUILDER 3D</h2>
             <p class="subtitle">Editor Sandbox Integrato nel Mondo di Gioco</p>
@@ -1019,7 +1019,7 @@
                     <li><span class="key">Click DX</span> &nbsp; <b>Scava / Alterna</b> (Rimuovi voxel o vegetazione)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Seleziona strumento Hotbar</li>
                     <li><span class="key">Rotellina</span> o <span class="key">[</span> <span class="key">]</span> &nbsp; Modifica raggio pennello</li>
-                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide</li>
+                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> <span class="key">F9</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide • Borgosesia</li>
                     <li><span class="key">N</span> &nbsp; Avanza Orario Ciclo Giorno / Notte (+3h)</li>
                     <li><span class="key">F</span> &nbsp; Alterna Volo Drone / A Piedi</li>
                     <li><span class="key">P</span> &nbsp; <b>Gioca Subito</b> (Testa istantaneamente la mappa)</li>
@@ -1040,6 +1040,7 @@
                 <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('tigris')">🏔️ [F6] VAI ALLE SORGENTI TIGRI &amp; EUFRATE</button>
                 <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('gibraltar')">🏛️ [F7] VAI ALLE COLONNE D'ERCOLE</button>
                 <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('atlantis')">👑 [F8] VAI A CLEITO (ATLANTIDE)</button>
+                <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('borgosesia')">🌲 [F9] VAI A BORGOSESIA — VALSESIA (ITALIA)</button>
                 <button class="modal-btn secondary" id="modal-export">💾 ESPORTA FILE JSON</button>
                 <button class="modal-btn secondary" id="modal-import">📂 IMPORTA FILE JSON</button>
                 <button class="modal-btn danger" id="modal-reset">🔄 RIPRISTINA MAPPA NATURALE</button>
@@ -1072,6 +1073,6 @@
         })();
     </script>
 
-    <script type="module" src="editor.js?v=0.212"></script>
+    <script type="module" src="editor.js?v=0.213"></script>
 </body>
 </html>

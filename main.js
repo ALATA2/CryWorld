@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { VoxelTerrain } from './marching_cubes.js?v=0.212';
-import { WaterSystem } from './water_system.js?v=0.212';
-import { createAtlantisCapital } from './atlantis_capital.js?v=0.212';
-import { WorldRealismSystem } from './world_realism.js?v=0.212';
+import { VoxelTerrain } from './marching_cubes.js?v=0.213';
+import { WaterSystem } from './water_system.js?v=0.213';
+import { createAtlantisCapital } from './atlantis_capital.js?v=0.213';
+import { WorldRealismSystem } from './world_realism.js?v=0.213';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
@@ -1287,6 +1287,11 @@ function teleportToRegion(regionKey) {
         targetZ = -12520.0;
         targetYaw = 1.57;
         label = '🏛️ Colonne d\'Ercole (Stretto di Gibilterra)';
+    } else if (regionKey === 'borgosesia') {
+        targetX = 2950.0; // Conca di Borgosesia — Valsesia, Fiume Sesia & Monte Rosa (Piemonte, Italia)
+        targetZ = -15275.0;
+        targetYaw = 0.72; // Looking NW up the Valsesia valley toward the Sesia River & Monte Rosa massif
+        label = '🌲 Borgosesia — Valsesia, Fiume Sesia & Monte Rosa (Italia)';
     }
 
     const destPos = new THREE.Vector3(targetX, 240.0, targetZ);
@@ -1354,6 +1359,9 @@ function setupInputListeners() {
         } else if (event.code === 'F8') {
             event.preventDefault();
             teleportToRegion('atlantis');
+        } else if (event.code === 'F9') {
+            event.preventDefault();
+            teleportToRegion('borgosesia');
         }
     };
 
@@ -3553,8 +3561,9 @@ function spawnEnvironmentObjects(scene, terrain) {
         cell.push({ x, z });
     }
     function isArchitecturallyClear(wx, wz) {
-        // Keep clear of the immediate player spawn terrace at Tigris & Euphrates Headwaters
+        // Keep clear of the immediate player spawn terrace at Tigris & Euphrates Headwaters and Borgosesia landing terrace
         if (Math.hypot(wx - 14200.0, wz - (-13775.0)) < 14.0) return false;
+        if (Math.hypot(wx - 2950.0, wz - (-15275.0)) < 14.0) return false;
 
         const ax = wx - (-10800.0);
         const az = wz - (-10600.0);
@@ -3594,10 +3603,21 @@ function spawnEnvironmentObjects(scene, terrain) {
         return true;
     }
     
-    // Helper: distributes vegetation across BOTH the Tigris/Euphrates/Mesopotamia starting region (14200, -13800)
-    // AND Cleito / Capital of Atlantis + 10 Surrounding Islands in the Atlantic Ocean (-10800, -10600)!
-    function sampleAtlantisPoint(maxR) {
-        if (Math.random() < 0.48) {
+    // Helper: distributes vegetation across Tigris/Euphrates/Mesopotamia (14200, -13800),
+    // Cleito / Capital of Atlantis + 10 Surrounding Islands (-10800, -10600),
+    // AND Borgosesia / Valsesia / Monte Rosa (2950, -15300) for alpine/woodland trees, shrubs & river rocks!
+    function sampleAtlantisPoint(maxR, includeBorgosesia = false) {
+        const roll = Math.random();
+        if (includeBorgosesia && roll < 0.24) {
+            // Borgosesia — Valsesia, Fiume Sesia & Monte Fenera / Monte Rosa slopes (Piemonte, Italy)
+            const rad = Math.sqrt(Math.random()) * Math.min(maxR * 0.85, 1950.0);
+            const ang = Math.random() * Math.PI * 2.0;
+            return {
+                wx: 2950.0 + Math.cos(ang) * rad,
+                wz: -15300.0 + Math.sin(ang) * rad
+            };
+        }
+        if (roll < (includeBorgosesia ? 0.62 : 0.48)) {
             // Tigris & Euphrates Headwaters + Mesopotamia Fertile Crescent
             const rad = Math.sqrt(Math.random()) * (maxR * 0.95);
             const ang = Math.random() * Math.PI * 2.0;
@@ -3706,11 +3726,11 @@ function spawnEnvironmentObjects(scene, terrain) {
     while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 22000) {
         attempts++;
         const maxR = ((pinesAPlaced + pinesBPlaced) < pineTreesCount * 0.25) ? 980.0 : 2245.0;
-        const { wx, wz } = sampleAtlantisPoint(maxR);
-        const groundHeight = getFastGroundHeight(wx, wz, 122.0, 152.0);
+        const { wx, wz } = sampleAtlantisPoint(maxR, true);
+        const groundHeight = getFastGroundHeight(wx, wz, 122.0, 158.0);
 
-        // Clothe Cleito's concentric rings, coves & Acropolis gardens (122.0m up to 152.0m) in lush jungle canopy
-        if (groundHeight >= 122.0 && groundHeight < 152.0 && isFarEnough(wx, wz, 4.4)) {
+        // Clothe Cleito's concentric rings, Mesopotamia & Borgosesia's Valsesia slopes (122.0m up to 158.0m) in lush canopy
+        if (groundHeight >= 122.0 && groundHeight < 158.0 && isFarEnough(wx, wz, 4.4)) {
             const y = groundHeight - 0.16;
             const rotationY = Math.random() * Math.PI * 2;
             const scXZ = 0.80 + Math.random() * 0.52;
@@ -3764,7 +3784,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     while (bushesPlaced < bushesCount && attempts < 22000) {
         attempts++;
         const maxR = (bushesPlaced < bushesCount * 0.26) ? 980.0 : 2255.0;
-        const { wx, wz } = sampleAtlantisPoint(maxR);
+        const { wx, wz } = sampleAtlantisPoint(maxR, true);
         if (!isArchitecturallyClear(wx, wz)) continue;
         // First 55% of shrubs concentrate right along the dune-scrub transition (120.85m .. 128.5m) for a 3D feathered beach edge!
         const maxBushY = (bushesPlaced < bushesCount * 0.55) ? 128.5 : 151.0;
@@ -3798,7 +3818,7 @@ function spawnEnvironmentObjects(scene, terrain) {
     let rocksPlaced = 0;
     while (rocksPlaced < rocksCount && attempts < 11000) {
         attempts++;
-        const { wx, wz } = sampleAtlantisPoint(2320.0);
+        const { wx, wz } = sampleAtlantisPoint(2320.0, true);
         const groundHeight = getFastGroundHeight(wx, wz, 119.0, 123.6);
 
         if (groundHeight > 119.0 && groundHeight < 123.6 && isFarEnough(wx, wz, 5.2)) {

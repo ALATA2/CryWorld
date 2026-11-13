@@ -68,6 +68,7 @@ export class WorldRealismSystem {
         this.mesopotamiaWildlifeGroup = new THREE.Group();
         this.atlantisWildlifeGroup = new THREE.Group();
         this.gibraltarWildlifeGroup = new THREE.Group();
+        this.borgosesiaWildlifeGroup = new THREE.Group();
         this.eagles = [];
         this.ibexHerd = [];
         this.riverFish = [];
@@ -616,6 +617,67 @@ export class WorldRealismSystem {
             this.gibraltarWildlifeGroup.add(gull);
         }
         this.scene.add(this.gibraltarWildlifeGroup);
+
+        // --------------------------------------------------------------------
+        // REGION D: BORGOSESIA — VALSESIA, FIUME SESIA & MONTE ROSA (2950, -15300)
+        // --------------------------------------------------------------------
+        // 1. Aquile Reali del Monte Rosa e della Valsesia (8 Alpine Golden Eagles)
+        const borgoEagleCenters = [
+            { x: 2950.0, z: -15275.0, baseAlt: 182.0, r: 90.0 },  // Over Borgosesia & Sesia River
+            { x: 2425.0, z: -15840.0, baseAlt: 266.0, r: 155.0 }, // Circling Snowy Monte Rosa Massif (Punta Dufour)
+            { x: 3505.0, z: -15075.0, baseAlt: 205.0, r: 105.0 }  // Over Monte Fenera Natural Park
+        ];
+        for (let i = 0; i < 8; i++) {
+            const center = borgoEagleCenters[i % borgoEagleCenters.length];
+            const eagle = this._createBirdMesh(2.45, 0x4d3319, 0x221509, 0xe5b528);
+            eagle.userData.cx = center.x + (Math.sin(i * 1.9) * 30.0);
+            eagle.userData.cz = center.z + (Math.cos(i * 1.9) * 30.0);
+            eagle.userData.baseY = center.baseAlt + (i % 4) * 8.0;
+            eagle.userData.radius = center.r + (i % 4) * 16.0;
+            eagle.userData.speed = 0.23 + (i % 3) * 0.035;
+            eagle.userData.phase = i * 0.95;
+            eagle.userData.flapFreq = 2.8 + (i % 3) * 0.4;
+            this.eagles.push(eagle);
+            this.borgosesiaWildlifeGroup.add(eagle);
+        }
+
+        // 2. Stambecchi delle Alpi Valsesiane (6 Alpine Ibex on Valsesia & Monte Rosa / Monte Fenera slopes)
+        const borgoIbexSpots = [
+            { x: 2985.0, z: -15295.0 },
+            { x: 2996.0, z: -15284.0 },
+            { x: 2915.0, z: -15335.0 },
+            { x: 3045.0, z: -15235.0 },
+            { x: 2810.0, z: -15460.0 },
+            { x: 3180.0, z: -15180.0 }
+        ];
+        for (let i = 0; i < borgoIbexSpots.length; i++) {
+            const spot = borgoIbexSpots[i];
+            const ibex = this._createMountainIbexMesh();
+            const groundY = this._sampleTerrainHeight(spot.x, spot.z);
+            ibex.position.set(spot.x, groundY, spot.z);
+            ibex.userData.homeX = spot.x;
+            ibex.userData.homeZ = spot.z;
+            ibex.userData.phase = i * 1.4;
+            ibex.userData.walkRadius = 5.5 + (i % 3) * 2.2;
+            this.ibexHerd.push(ibex);
+            this.borgosesiaWildlifeGroup.add(ibex);
+        }
+
+        // 3. Trote Marmorate e Fario del Fiume Sesia (14 Alpine River Trout swimming in the Sesia River)
+        for (let i = 0; i < 14; i++) {
+            const baseZ = -15360.0 + i * 24.0;
+            const fish = this._createFishMesh(0.54 + (i % 3) * 0.10, (i % 2 === 0) ? 0x8ea885 : 0xb89b6a);
+            fish.userData.cx = 2848.0 + ((baseZ + 15300.0) * 0.22);
+            fish.userData.cz = baseZ;
+            fish.userData.rx = 10.0 + (i % 3) * 2.5;
+            fish.userData.rz = 15.0 + (i % 3) * 5.0;
+            fish.userData.depthY = 118.45 + (i % 3) * 0.30;
+            fish.userData.speed = 0.72 + (i % 4) * 0.12;
+            fish.userData.phase = i * 0.83;
+            this.riverFish.push(fish);
+            this.borgosesiaWildlifeGroup.add(fish);
+        }
+        this.scene.add(this.borgosesiaWildlifeGroup);
     }
 
     // ========================================================================
@@ -623,7 +685,10 @@ export class WorldRealismSystem {
     // ========================================================================
     _updatePositionalAudio(cameraPos, isMuted, delta) {
         const distFire = cameraPos.distanceTo(this.campfirePos);
-        const distSprings = Math.hypot(cameraPos.x - 14200.0, cameraPos.z - (-13760.0));
+        const distSprings = Math.min(
+            Math.hypot(cameraPos.x - 14200.0, cameraPos.z - (-13760.0)),
+            Math.hypot(cameraPos.x - 2855.0, cameraPos.z - (-15275.0)) // Fiume Sesia at Borgosesia
+        );
 
         // Only initialize WebAudio when player is near the campfire/springs and sound is unmuted
         if (isMuted || (distFire > 35.0 && distSprings > 180.0)) {
@@ -921,12 +986,17 @@ export class WorldRealismSystem {
         }
 
         // 3. Animate Regional Wildlife (Only active in current geographic zone -> Zero CPU waste!)
+        const distBorgosesia = Math.hypot(cameraPos.x - 2950.0, cameraPos.z - (-15300.0));
+        const inBorgosesia = distBorgosesia < 3200.0;
         this.mesopotamiaWildlifeGroup.visible = inMesopotamia;
-        if (inMesopotamia) {
+        this.borgosesiaWildlifeGroup.visible = inBorgosesia;
+
+        if (inMesopotamia || inBorgosesia) {
             const t = this.elapsedTime;
-            // Golden Eagles soaring over Mount Ararat & Tigris/Euphrates Headwaters
+            // Golden Eagles soaring over Mount Ararat, Tigris/Euphrates Headwaters, or Monte Rosa & Borgosesia
             for (let i = 0; i < this.eagles.length; i++) {
                 const eagle = this.eagles[i];
+                if (!eagle.parent || !eagle.parent.visible) continue;
                 const ud = eagle.userData;
                 const ang = t * ud.speed + ud.phase;
                 const nx = ud.cx + Math.cos(ang) * ud.radius;
@@ -946,9 +1016,10 @@ export class WorldRealismSystem {
                 eagle.userData.rightWing.rotation.z = -flap;
             }
 
-            // Caucasian / Taurus Ibex grazing & walking on alpine ledges
+            // Caucasian / Taurus / Valsesia Alpine Ibex grazing & walking on alpine ledges
             for (let i = 0; i < this.ibexHerd.length; i++) {
                 const ibex = this.ibexHerd[i];
+                if (!ibex.parent || !ibex.parent.visible) continue;
                 const ud = ibex.userData;
                 const cycle = t * 0.35 + ud.phase;
                 const isWalking = Math.sin(cycle * 0.7) > 0.15;
@@ -975,9 +1046,10 @@ export class WorldRealismSystem {
                 }
             }
 
-            // River Fish swimming in Tigris & Euphrates
+            // River Fish swimming in Tigris, Euphrates, or Fiume Sesia
             for (let i = 0; i < this.riverFish.length; i++) {
                 const fish = this.riverFish[i];
+                if (!fish.parent || !fish.parent.visible) continue;
                 const ud = fish.userData;
                 const ang = t * ud.speed + ud.phase;
                 fish.position.set(
