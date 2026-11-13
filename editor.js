@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { VoxelTerrain } from "./marching_cubes.js?v=0.210";
-import { createAtlantisCapital } from "./atlantis_capital.js?v=0.210";
+import { VoxelTerrain } from "./marching_cubes.js?v=0.211";
+import { createAtlantisCapital } from "./atlantis_capital.js?v=0.211";
 
 // ==========================================
 // EDITOR GAMEPLAY STATE & GLOBALS
@@ -96,6 +96,44 @@ const fileInput = document.getElementById("file-input");
 // FPS Calculation
 let frameCount = 0;
 let lastFpsTime = performance.now();
+let isEditorWorldLoaded = false;
+
+// ==========================================
+// CRYING / LOADING PROGRESS BAR CONTROLLER
+// ==========================================
+function setCryingProgress(percent, statusText) {
+    window.__cryingEngineControlled = true;
+    const fill = document.getElementById("crying-bar-fill");
+    const pct = document.getElementById("crying-percent");
+    const status = document.getElementById("crying-status");
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    if (fill) fill.style.width = `${clamped}%`;
+    if (pct) pct.textContent = `${clamped}%`;
+    if (status && statusText) status.textContent = statusText;
+}
+
+function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+function finishCryingLoader() {
+    isEditorWorldLoaded = true;
+    setCryingProgress(100, "✨ Level Builder pronto! Benvenuto in CryWorld");
+    const loader = document.getElementById("crying-loader");
+    const startBtns = document.getElementById("start-buttons-row");
+    setTimeout(() => {
+        if (loader) {
+            loader.style.opacity = "0";
+            loader.style.transform = "translateY(-6px)";
+            setTimeout(() => {
+                loader.classList.add("hidden");
+                if (startBtns) startBtns.classList.remove("hidden");
+            }, 260);
+        } else if (startBtns) {
+            startBtns.classList.remove("hidden");
+        }
+    }, 240);
+}
 
 // ==========================================
 // TOAST NOTIFICATIONS
@@ -112,7 +150,10 @@ function showToast(msg) {
 // ==========================================
 // INITIALIZATION
 // ==========================================
-function init() {
+async function init() {
+    setCryingProgress(20, "💧 CRYING... Inizializzazione Cielo Volumetrico & Oceano...");
+    await nextFrame();
+
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff);
     scene.fog = new THREE.Fog(0x8ce3ff, 1950, 4100); // Clear panoramic view across 4.8km Cleito, 4 Walls + Mist Ring!
@@ -420,8 +461,15 @@ function init() {
 
     scene.add(water);
 
+    setCryingProgress(38, "🌍 CRYING... Generazione Mappa Planetaria 3D (Terra/Luna)...");
+    await nextFrame();
+
     // Marching Cubes Voxel Terrain (Planetary Engine with Height 96 voxels)
     terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
+
+    setCryingProgress(54, "👑 CRYING... Erezione Capitale di Atlantide (Cleito) & 4 Mura...");
+    await nextFrame();
+
     createAtlantisMistRing(scene);
     atlantisCapital = createAtlantisCapital(scene, terrain);
 
@@ -437,7 +485,13 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
+    setCryingProgress(72, "🏔️ CRYING... Scolpitura Sorgenti del Tigri, Eufrate & Monte Ararat...");
+    await nextFrame();
+
     terrain.updateChunksAroundPlayer(playerPos, 1050, 340);
+
+    setCryingProgress(88, "🌊 CRYING... Calcolo Batimetria Costiera & Strumenti Editor...");
+    await nextFrame();
 
     heightmapData = new Uint8Array(768 * 768);
     updateHeightmap();
@@ -496,6 +550,8 @@ function init() {
     updateModCount();
 
     window.addEventListener("resize", onWindowResize);
+    renderer.render(scene, camera);
+    finishCryingLoader();
     requestAnimationFrame(animate);
 }
 
@@ -505,10 +561,12 @@ function init() {
 function setupEvents() {
     // Blocker / Start Editing Button
     btnStartEditing.addEventListener("click", () => {
+        if (!isEditorWorldLoaded) return;
         enterPointerLock();
     });
 
     blocker.addEventListener("click", (e) => {
+        if (!isEditorWorldLoaded) return;
         if (e.target.tagName !== "BUTTON") {
             enterPointerLock();
         }

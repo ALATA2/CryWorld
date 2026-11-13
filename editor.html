@@ -486,6 +486,100 @@
             margin-bottom: 6px;
         }
 
+        /* CRYING / LOADING World Progress Bar */
+        #crying-loader {
+            margin: 0 auto 24px auto;
+            max-width: 480px;
+            background: rgba(11, 29, 40, 0.88);
+            border: 1.5px solid rgba(0, 229, 255, 0.42);
+            border-radius: 16px;
+            padding: 18px 22px;
+            box-shadow: 0 10px 35px rgba(0, 210, 255, 0.22), inset 0 0 22px rgba(0, 210, 255, 0.08);
+            backdrop-filter: blur(10px);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+
+        .crying-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .crying-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 2.2px;
+            text-transform: uppercase;
+            background: linear-gradient(90deg, #00f0ff, #00ff88, #ffae00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: crying-pulse 1.6s infinite ease-in-out;
+        }
+
+        .crying-drop {
+            display: inline-block;
+            -webkit-text-fill-color: initial;
+            animation: crying-drop-bounce 1.2s infinite ease-in-out;
+        }
+
+        #crying-percent {
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: 800;
+            color: #00f0ff;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.55);
+        }
+
+        .crying-bar-track {
+            width: 100%;
+            height: 14px;
+            background: rgba(4, 12, 18, 0.85);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65);
+        }
+
+        #crying-bar-fill {
+            width: 8%;
+            height: 100%;
+            border-radius: 10px;
+            background: linear-gradient(90deg, #0072ff 0%, #00f0ff 45%, #00ff88 78%, #ffae00 100%);
+            background-size: 200% 100%;
+            box-shadow: 0 0 16px rgba(0, 240, 255, 0.75);
+            transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: crying-shimmer 1.8s linear infinite;
+        }
+
+        #crying-status {
+            margin-top: 9px;
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(190, 235, 255, 0.88);
+            letter-spacing: 0.4px;
+            font-family: monospace;
+        }
+
+        @keyframes crying-shimmer {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+        }
+
+        @keyframes crying-pulse {
+            0%, 100% { opacity: 1; filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.35)); }
+            50% { opacity: 0.78; filter: drop-shadow(0 0 14px rgba(0, 240, 255, 0.7)); }
+        }
+
+        @keyframes crying-drop-bounce {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(3px) scale(1.12); }
+        }
+
         .key {
             background: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.4);
@@ -755,7 +849,7 @@
             FPS: <span id="fps-counter">60</span>
         </div>
         <div class="hud-card version-card">
-            V 0.210
+            V 0.211
         </div>
         <div class="hud-card altimeter-card" id="altimeter-card">
             ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -767,11 +861,26 @@
 
     <!-- Initial Click-to-Play Blocker Overlay matching Gameplay -->
     <div id="blocker">
-        <div id="homepage-version">V 0.210</div>
+        <div id="homepage-version">V 0.211</div>
         <div id="instructions">
             <h2>LEVEL BUILDER 3D</h2>
             <p class="subtitle">Editor Sandbox Integrato nel Mondo di Gioco</p>
-            <button class="main-play-btn" id="btn-start-editing">ENTRA NELL'EDITOR</button>
+
+            <!-- CRYING / LOADING Initial World Progress Bar -->
+            <div id="crying-loader">
+                <div class="crying-header">
+                    <div class="crying-title"><span class="crying-drop">💧</span> CRYING... <span style="font-size: 11px; opacity: 0.75; letter-spacing: 1px;">(LOADING EDITOR)</span></div>
+                    <span id="crying-percent">8%</span>
+                </div>
+                <div class="crying-bar-track">
+                    <div id="crying-bar-fill"></div>
+                </div>
+                <div id="crying-status">Inizializzazione Level Builder 3D &amp; shader...</div>
+            </div>
+
+            <div id="start-buttons-row" class="hidden">
+                <button class="main-play-btn" id="btn-start-editing">ENTRA NELL'EDITOR</button>
+            </div>
             <div class="instructions-detail">
                 <strong>COMANDI GAMEPLAY &amp; EDITOR:</strong>
                 <ul>
@@ -815,6 +924,26 @@
     <div id="toast" class="music-toast hidden">Mappa salvata con successo!</div>
     <input type="file" id="file-input" accept=".json">
 
-    <script type="module" src="editor.js?v=0.210"></script>
+    <!-- Early Pre-Module Loading Ticker -->
+    <script>
+        (function() {
+            var p = 6;
+            var fill = document.getElementById('crying-bar-fill');
+            var pct = document.getElementById('crying-percent');
+            window.__cryingBootTimer = setInterval(function() {
+                if (window.__cryingEngineControlled) {
+                    clearInterval(window.__cryingBootTimer);
+                    return;
+                }
+                if (p < 18) {
+                    p += 2;
+                    if (fill) fill.style.width = p + '%';
+                    if (pct) pct.textContent = p + '%';
+                }
+            }, 90);
+        })();
+    </script>
+
+    <script type="module" src="editor.js?v=0.211"></script>
 </body>
 </html>

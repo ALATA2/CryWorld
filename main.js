@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { VoxelTerrain } from './marching_cubes.js?v=0.210';
-import { WaterSystem } from './water_system.js?v=0.210';
-import { createAtlantisCapital } from './atlantis_capital.js?v=0.210';
+import { VoxelTerrain } from './marching_cubes.js?v=0.211';
+import { WaterSystem } from './water_system.js?v=0.211';
+import { createAtlantisCapital } from './atlantis_capital.js?v=0.211';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
@@ -95,15 +95,57 @@ let lastBobY = 0;
 let currentFov = 65;
 const defaultFov = 65;
 const runFov = 73;
+let isWorldLoaded = false;
 
-// Initialize the game
-init();
-animate();
+// ==========================================
+// CRYING / LOADING PROGRESS BAR CONTROLLER
+// ==========================================
+function setCryingProgress(percent, statusText) {
+    window.__cryingEngineControlled = true;
+    const fill = document.getElementById('crying-bar-fill');
+    const pct = document.getElementById('crying-percent');
+    const status = document.getElementById('crying-status');
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    if (fill) fill.style.width = `${clamped}%`;
+    if (pct) pct.textContent = `${clamped}%`;
+    if (status && statusText) status.textContent = statusText;
+}
+
+function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+function finishCryingLoader() {
+    isWorldLoaded = true;
+    setCryingProgress(100, '✨ Mondo pronto! Benvenuto in CryWorld');
+    const loader = document.getElementById('crying-loader');
+    const startBtns = document.getElementById('start-buttons-row');
+    setTimeout(() => {
+        if (loader) {
+            loader.style.opacity = '0';
+            loader.style.transform = 'translateY(-6px)';
+            setTimeout(() => {
+                loader.classList.add('hidden');
+                if (startBtns) startBtns.classList.remove('hidden');
+            }, 260);
+        } else if (startBtns) {
+            startBtns.classList.remove('hidden');
+        }
+    }, 240);
+}
+
+// Initialize the game asynchronously so the CRYING / LOADING bar updates smoothly in real-time
+init().then(() => {
+    animate();
+});
 
 // ==========================================
 // CORE INITIALIZATION
 // ==========================================
-function init() {
+async function init() {
+    setCryingProgress(20, '💧 CRYING... Inizializzazione Cielo Volumetrico & Oceano...');
+    await nextFrame();
+
     // 1. Scene & Camera Setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff); // Caribbean cyan horizon background
@@ -560,8 +602,14 @@ function init() {
     
     scene.add(water);
 
+    setCryingProgress(36, '🌍 CRYING... Generazione Mappa Planetaria 3D (Terra/Luna)...');
+    await nextFrame();
+
     // 6. Marching Cubes Voxel Terrain Setup (Height 96 voxels = 288m for Sacred Mountain, Mount Ararat & Alpine Peaks)
     terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
+
+    setCryingProgress(50, '👑 CRYING... Erezione Capitale di Atlantide (Cleito) & 4 Mura...');
+    await nextFrame();
 
     // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis in the Atlantic Ocean
     createAtlantisMistRing(scene);
@@ -596,8 +644,14 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
+    setCryingProgress(66, '🏔️ CRYING... Scolpitura Sorgenti del Tigri, Eufrate & Monte Ararat...');
+    await nextFrame();
+
     // Build initial chunks around the Tigris & Euphrates Headwaters immediately
     terrain.updateChunksAroundPlayer(testPos, 1080, 380);
+
+    setCryingProgress(82, '🌊 CRYING... Calcolo Batimetria Costiera & Fiumi Navigabili...');
+    await nextFrame();
 
     // Initialize 768x768 high-precision bathymetry depth texture (5222.4m x 5222.4m centered on active region)
     heightmapData = new Uint8Array(768 * 768);
@@ -641,6 +695,7 @@ function init() {
         checkOrientation(); // Run check immediately
 
         startBtn.addEventListener('click', () => {
+            if (!isWorldLoaded) return;
             // Trigger fullscreen on touch devices (requires user action)
             const docEl = document.documentElement;
             if (docEl.requestFullscreen) docEl.requestFullscreen();
@@ -658,6 +713,7 @@ function init() {
         });
     } else {
         blocker.addEventListener('click', () => {
+            if (!isWorldLoaded) return;
             startBackgroundMusic();
             controls.lock();
         });
@@ -1021,6 +1077,9 @@ function init() {
         });
     });
 
+    setCryingProgress(93, '🌴 CRYING... Popolamento Foreste di Cedri, Palme & Rocce...');
+    await nextFrame();
+
     // 7c. Spawning Stylized Foliage and Rocks on the Voxel Terrain
     spawnEnvironmentObjects(scene, terrain);
 
@@ -1033,9 +1092,13 @@ function init() {
 
     // Trigger initial static shadow map render
     renderer.shadowMap.needsUpdate = true;
+    renderer.render(scene, camera);
 
     // Adjust sizes on resize
     window.addEventListener('resize', onWindowResize);
+
+    // Reveal Start Buttons after 100% completion
+    finishCryingLoader();
 }
 
 // ==========================================
