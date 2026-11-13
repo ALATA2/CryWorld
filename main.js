@@ -2,16 +2,17 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { VoxelTerrain } from './marching_cubes.js?v=0.211';
-import { WaterSystem } from './water_system.js?v=0.211';
-import { createAtlantisCapital } from './atlantis_capital.js?v=0.211';
+import { VoxelTerrain } from './marching_cubes.js?v=0.212';
+import { WaterSystem } from './water_system.js?v=0.212';
+import { createAtlantisCapital } from './atlantis_capital.js?v=0.212';
+import { WorldRealismSystem } from './world_realism.js?v=0.212';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
 // GAME STATE variables
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun, dirLight, heightmapTexture, heightmapData, waterSystem;
+let terrain, water, sky, sun, dirLight, ambientLight, hemiLight, heightmapTexture, heightmapData, waterSystem, worldRealism;
 let hmCenterX = 14200.0, hmCenterZ = -13800.0;
 const hmBoundsUniform = { value: new THREE.Vector4(14200.0 - 2611.2, -13800.0 - 2611.2, 5222.4, 5222.4) };
 let lastShadowSnapX = 1e9, lastShadowSnapZ = 1e9, prevShadowQueueLen = 0;
@@ -168,10 +169,10 @@ async function init() {
     renderer.toneMappingExposure = 1.15; // Bright, sun-drenched exposure
 
     // 3. Lighting Setup (Next-Gen Tropical Golden Sunlight + Sky/Jungle Hemisphere Fill)
-    const ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
+    ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
     scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
+    hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
     hemiLight.position.set(0, 300, 0);
     scene.add(hemiLight);
 
@@ -554,8 +555,10 @@ async function init() {
              float sunGlintPath = pow(NdotH, 72.0) * 0.20;
              finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
 
-             // 4. Crisp White Shoreline Swash Lace (0.04m..0.62m) + Reef-Crest Breaker Wisps (0.8m..2.4m) — Zero Milky Patina!
-             float foamNoise = wFbm(wPosMod * 0.62 + vec2(time * 0.48, -time * 0.34));
+             // 4. Crisp White Shoreline Swash Lace (0.04m..0.62m) + Reef-Crest Breaker Wisps + Mesopotamia River Flow
+             float inMesopotamiaFlow = 1.0 - smoothstep(1800.0, 3800.0, length(worldPosition.xz - vec2(14200.0, -13800.0)));
+             vec2 flowVel = mix(vec2(time * 0.48, -time * 0.34), vec2(time * 0.16, -time * 1.35), inMesopotamiaFlow);
+             float foamNoise = wFbm(wPosMod * 0.62 + flowVel);
              float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);
              float shoreLace = smoothstep(0.62, 0.06, waterDepth)
                              * smoothstep(0.0, 0.05, waterDepth)
@@ -660,6 +663,10 @@ async function init() {
     const groundY = terrain.getSurfaceHeight(testPos, 250.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
     camera.rotation.set(-0.06, 3.08, 0, 'YXZ');
+
+    // Initialize World Realism System (5-Min Day/Night Cycle, Spawn Campfire, Twin Springs, Regional Wildlife & Wind)
+    worldRealism = new WorldRealismSystem(scene, terrain, { isEditor: false });
+    worldRealism.refreshCampfireHeight();
 
     // Center initial shadow frustum on spawn terrace
     lastShadowSnapX = Math.round(startX / 16) * 16;
@@ -1333,6 +1340,10 @@ function setupInputListeners() {
         }
         if (event.code === 'KeyM') {
             toggleMusicMute();
+        }
+        if (event.code === 'KeyN' && worldRealism) {
+            const tInfo = worldRealism.advanceTimeHours(3.0);
+            showMusicToast(`Ciclo Giorno/Notte: ${tInfo.text} (${tInfo.label})`);
         }
         if (event.code === 'F6') {
             event.preventDefault();
@@ -2111,6 +2122,21 @@ function animate() {
     // 5. Water waves animation (reduced speed from 0.5 to 0.12 to prevent shoreline vibration)
     water.material.uniforms['time'].value += delta * 0.12;
 
+    // 5b. Update World Realism (5-Min Day/Night Cycle, Spawn Campfire, Twin Springs, Regional Wildlife & Positional Audio)
+    if (worldRealism) {
+        worldRealism.update(delta, camera.position, {
+            dirLight,
+            ambientLight,
+            hemiLight,
+            water,
+            sky,
+            isMuted: bgmMuted
+        });
+        if (sun) {
+            sun.copy(worldRealism.lightDirection);
+        }
+    }
+
     // 5bb. Check if player camera is underwater (Y < localWaterLevel) to trigger immersive effects, or high up to trigger space orbit effects
     const underwaterOverlay = document.getElementById('underwater-overlay');
     const localWaterAtCamera = waterSystem ? waterSystem.getWaterLevelAt(camera.position.x, camera.position.z) : 120.0;
@@ -2120,7 +2146,7 @@ function animate() {
     // Altitude-based aerial perspective (flying into orbit)
     const altitude = camera.position.y;
     let altFactor = 0.0;
-    let starIntensity = 0.0;
+    let orbitStars = 0.0;
 
     if (altitude > 180.0) {
         // Smooth transition to black space from 180m up to 1100m (1.1km)
@@ -2128,17 +2154,14 @@ function animate() {
     }
     if (altitude > 350.0) {
         // Crisp stars fade in progressively from 350m up to 1100m (1.1km)
-        starIntensity = Math.min(Math.max((altitude - 350.0) / 750.0, 0.0), 1.0);
-    }
-    
-    // Planetary Atmosphere color modulation by latitude & biome
-    let baseAtmosphere = new THREE.Color(0x8ce3ff);
-    if (terrain && terrain.getPlanetaryAtmosphereColor) {
-        baseAtmosphere = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
+        orbitStars = Math.min(Math.max((altitude - 350.0) / 750.0, 0.0), 1.0);
     }
 
-    const skyTopColor = new THREE.Color(0x0078d7);
-    const skyBottomColor = baseAtmosphere;
+    const skyTopColor = worldRealism ? worldRealism.currentTopColor : new THREE.Color(0x0078d7);
+    const skyBottomColor = worldRealism ? worldRealism.currentBottomColor : new THREE.Color(0x8ce3ff);
+    const nightStars = worldRealism ? worldRealism.currentStarIntensity : 0.0;
+    const nightFactor = worldRealism ? worldRealism.currentNightFactor : 0.0;
+    const starIntensity = Math.max(orbitStars, nightStars);
     const spaceColor = new THREE.Color(0x000002); // Deep black space
  
     // Interpolate sky colors based on altitude
@@ -2153,7 +2176,7 @@ function animate() {
         }
     }
  
-    const currentFogColor = baseAtmosphere.clone().lerp(spaceColor, altFactor);
+    const currentFogColor = skyBottomColor.clone().lerp(spaceColor, altFactor);
  
     if (isLookingFromBelow) {
         // Completely hide the sky dome, mist ring and clouds while underwater so no daylight sky/horizon leaks through
@@ -2210,7 +2233,7 @@ function animate() {
             mistImmerse = Math.max(0.0, rBand * hBand);
         }
 
-        const mistFogColor = new THREE.Color(0xdcf0fa);
+        const mistFogColor = new THREE.Color(0xdcf0fa).lerp(new THREE.Color(0x182c48), nightFactor * 0.82);
         const finalFogCol = currentFogColor.clone().lerp(mistFogColor, mistImmerse * 0.90);
         scene.fog.color.copy(finalFogCol);
         scene.background.copy(finalFogCol);
@@ -2221,7 +2244,7 @@ function animate() {
         scene.fog.near = THREE.MathUtils.lerp(baseNear, 16.0, mistImmerse);
         scene.fog.far  = THREE.MathUtils.lerp(baseFar, 155.0, mistImmerse);
 
-        renderer.toneMappingExposure = 1.15;
+        renderer.toneMappingExposure = THREE.MathUtils.lerp(1.15, 0.92, nightFactor);
 
         // Outside water: fully opaque water (alpha = 0.98) so submerged terrain is not visible from above
         if (water && water.material && water.material.uniforms['alpha']) {
@@ -3450,6 +3473,13 @@ function spawnEnvironmentObjects(scene, terrain) {
              reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.22, 0.32, 0.12);`
         );
     };
+
+    // Inject GPU Wind Animation into Palm Fronds, Cedar/Pine Canopies, and Shrubs (0% CPU cost)
+    if (worldRealism) {
+        worldRealism.injectFoliageWindShader(leafMat, 'palm');
+        worldRealism.injectFoliageWindShader(pineFoliageMat, 'canopy');
+        worldRealism.injectFoliageWindShader(bushMat, 'bush');
+    }
 
     // Initialize/clear global instance arrays
     palmInstances = [];

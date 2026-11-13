@@ -117,6 +117,120 @@
             pointer-events: auto;
         }
 
+        /* Planetary Horizontal Compass / Radar Bar (Level Editor Exclusive) */
+        #editor-compass-wrap {
+            align-self: center;
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            pointer-events: auto;
+        }
+
+        .compass-ribbon {
+            width: 520px;
+            max-width: 90vw;
+            height: 36px;
+            background: rgba(8, 22, 32, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1.5px solid rgba(0, 210, 255, 0.38);
+            border-radius: 18px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), inset 0 0 14px rgba(0, 210, 255, 0.10);
+        }
+
+        .compass-center-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 100%;
+            background: linear-gradient(180deg, #ffae00, rgba(255, 174, 0, 0.15));
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .compass-track {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .compass-tick {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.65);
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        .compass-tick.cardinal {
+            font-size: 13px;
+            color: #00f0ff;
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
+        }
+
+        .compass-poi {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            background: rgba(11, 29, 40, 0.92);
+            border: 1px solid rgba(255, 174, 0, 0.55);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 800;
+            color: #ffe082;
+            white-space: nowrap;
+            cursor: pointer;
+            z-index: 4;
+            transition: transform 0.12s ease, border-color 0.12s ease;
+        }
+
+        .compass-poi:hover {
+            border-color: #00f0ff;
+            color: #ffffff;
+            transform: translate(-50%, -50%) scale(1.08);
+        }
+
+        .compass-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(200, 238, 255, 0.9);
+            background: rgba(11, 29, 40, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            padding: 3px 12px;
+            border-radius: 12px;
+        }
+
+        .compass-time-badge {
+            color: #ffdf7e;
+            cursor: pointer;
+            padding: 1px 6px;
+            border-radius: 6px;
+            background: rgba(255, 174, 0, 0.14);
+            border: 1px solid rgba(255, 174, 0, 0.35);
+        }
+
+        .compass-time-badge:hover {
+            background: rgba(255, 174, 0, 0.28);
+        }
+
         .action-btn {
             background: var(--bg-card);
             backdrop-filter: blur(8px);
@@ -770,6 +884,19 @@
             </div>
         </div>
 
+        <!-- Planetary Horizontal Compass & Waypoint Radar (Level Editor Only) -->
+        <div id="editor-compass-wrap">
+            <div class="compass-ribbon">
+                <div class="compass-center-notch"></div>
+                <div class="compass-track" id="editor-compass-track"></div>
+            </div>
+            <div class="compass-meta-row">
+                <span>🧭 <b id="compass-heading-text">180° S</b></span>
+                <span>•</span>
+                <span class="compass-time-badge" id="compass-time-btn" title="Clicca o premi [N] per avanzare l'orario Giorno/Notte (+3h)">☀️ 15:35 [N]</span>
+            </div>
+        </div>
+
         <!-- Center interactive elements are handled by crosshair & raycaster -->
 
         <!-- Bottom Controls & Hotbar Section -->
@@ -849,7 +976,7 @@
             FPS: <span id="fps-counter">60</span>
         </div>
         <div class="hud-card version-card">
-            V 0.211
+            V 0.212
         </div>
         <div class="hud-card altimeter-card" id="altimeter-card">
             ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -861,7 +988,7 @@
 
     <!-- Initial Click-to-Play Blocker Overlay matching Gameplay -->
     <div id="blocker">
-        <div id="homepage-version">V 0.211</div>
+        <div id="homepage-version">V 0.212</div>
         <div id="instructions">
             <h2>LEVEL BUILDER 3D</h2>
             <p class="subtitle">Editor Sandbox Integrato nel Mondo di Gioco</p>
@@ -893,6 +1020,7 @@
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Seleziona strumento Hotbar</li>
                     <li><span class="key">Rotellina</span> o <span class="key">[</span> <span class="key">]</span> &nbsp; Modifica raggio pennello</li>
                     <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide</li>
+                    <li><span class="key">N</span> &nbsp; Avanza Orario Ciclo Giorno / Notte (+3h)</li>
                     <li><span class="key">F</span> &nbsp; Alterna Volo Drone / A Piedi</li>
                     <li><span class="key">P</span> &nbsp; <b>Gioca Subito</b> (Testa istantaneamente la mappa)</li>
                     <li><span class="key">ESC</span> &nbsp; Menu Opzioni / Salva / Importa</li>
@@ -944,6 +1072,6 @@
         })();
     </script>
 
-    <script type="module" src="editor.js?v=0.211"></script>
+    <script type="module" src="editor.js?v=0.212"></script>
 </body>
 </html>

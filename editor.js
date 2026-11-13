@@ -1,14 +1,15 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { VoxelTerrain } from "./marching_cubes.js?v=0.211";
-import { createAtlantisCapital } from "./atlantis_capital.js?v=0.211";
+import { VoxelTerrain } from "./marching_cubes.js?v=0.212";
+import { createAtlantisCapital } from "./atlantis_capital.js?v=0.212";
+import { WorldRealismSystem } from "./world_realism.js?v=0.212";
 
 // ==========================================
 // EDITOR GAMEPLAY STATE & GLOBALS
 // ==========================================
 let scene, camera, renderer, clock;
-let terrain, water, sky, sun;
+let terrain, water, sky, sun, dirLight, ambientLight, hemiLight, worldRealism;
 let atlantisMistGroup = null, atlantisMistUniforms = null, atlantisCapital = null;
 let heightmapData = null, heightmapTexture = null;
 let hmCenterX = 14200.0, hmCenterZ = -13800.0;
@@ -174,10 +175,10 @@ async function init() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Ambient, Hemisphere and Directional Lighting matching Next-Gen Gameplay
-    const ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
+    ambientLight = new THREE.AmbientLight(0xfff8ee, 0.55);
     scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
+    hemiLight = new THREE.HemisphereLight(0x88d4ff, 0x2d5e2e, 0.65);
     hemiLight.position.set(0, 300, 0);
     scene.add(hemiLight);
 
@@ -186,7 +187,7 @@ async function init() {
     const theta = THREE.MathUtils.degToRad(195);
     sun.setFromSphericalCoords(1, phi, theta);
 
-    const dirLight = new THREE.DirectionalLight(0xfff2d6, 2.40);
+    dirLight = new THREE.DirectionalLight(0xfff2d6, 2.40);
     dirLight.target.position.set(0, 126, 0);
     scene.add(dirLight.target);
     dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 420);
@@ -496,6 +497,11 @@ async function init() {
     heightmapData = new Uint8Array(768 * 768);
     updateHeightmap();
 
+    // Initialize World Realism System (5-Min Day/Night Cycle, Spawn Campfire, Twin Springs, Regional Wildlife)
+    worldRealism = new WorldRealismSystem(scene, terrain, { isEditor: true });
+    worldRealism.refreshCampfireHeight();
+    initEditorCompass();
+
     // Foliage Group
     foliageGroup = new THREE.Group();
     scene.add(foliageGroup);
@@ -636,6 +642,9 @@ function setupEvents() {
         } else if (e.code === "F8") {
             e.preventDefault();
             window.teleportEditorToRegion("atlantis");
+        } else if (e.code === "KeyN" && worldRealism) {
+            const tInfo = worldRealism.advanceTimeHours(3.0);
+            showToast(`Ciclo Giorno/Notte: ${tInfo.text} (${tInfo.label})`);
         }
 
         // Quick Save: Ctrl + S
@@ -1534,11 +1543,28 @@ function animate() {
         }
     }
 
-    // 3. Adaptive Atmospheric Fog & Volumetric Boundary Mist of Plato's Atlantis
-    let baseAtmo = new THREE.Color(0x8ce3ff);
-    if (terrain.getPlanetaryAtmosphereColor) {
-        baseAtmo = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
+    // 3. Update World Realism (5-Min Day/Night Cycle, Spawn Campfire, Twin Springs & Regional Wildlife)
+    if (worldRealism) {
+        worldRealism.update(delta, camera.position, {
+            dirLight,
+            ambientLight,
+            hemiLight,
+            water,
+            sky,
+            isMuted: false
+        });
+        if (sky && sky.material && sky.material.uniforms) {
+            sky.material.uniforms["topColor"].value.copy(worldRealism.currentTopColor);
+            sky.material.uniforms["bottomColor"].value.copy(worldRealism.currentBottomColor);
+            if (sky.material.uniforms["starIntensity"]) {
+                sky.material.uniforms["starIntensity"].value = worldRealism.currentStarIntensity;
+            }
+        }
     }
+
+    // 3b. Adaptive Atmospheric Fog & Volumetric Boundary Mist of Plato's Atlantis
+    let baseAtmo = worldRealism ? worldRealism.currentBottomColor : new THREE.Color(0x8ce3ff);
+    const nightFactor = worldRealism ? worldRealism.currentNightFactor : 0.0;
     const camDistCenter = Math.hypot(camera.position.x - (-10800.0), camera.position.z - (-10600.0));
     let mistImmerse = 0.0;
     if (camDistCenter > 2400.0 && camDistCenter < 2880.0 && camera.position.y < 360.0) {
@@ -1546,11 +1572,15 @@ function animate() {
         const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 250.0) / 110.0));
         mistImmerse = Math.max(0.0, rBand * hBand);
     }
-    const targetFogCol = baseAtmo.clone().lerp(new THREE.Color(0xdcf0fa), mistImmerse * 0.90);
+    const mistCol = new THREE.Color(0xdcf0fa).lerp(new THREE.Color(0x182c48), nightFactor * 0.82);
+    const targetFogCol = baseAtmo.clone().lerp(mistCol, mistImmerse * 0.90);
     scene.fog.color.lerp(targetFogCol, 0.12);
     scene.background.lerp(targetFogCol, 0.12);
     scene.fog.near = THREE.MathUtils.lerp(1950.0, 16.0, mistImmerse);
     scene.fog.far  = THREE.MathUtils.lerp(4100.0, 155.0, mistImmerse);
+    renderer.toneMappingExposure = THREE.MathUtils.lerp(1.12, 0.90, nightFactor);
+
+    updateEditorCompass();
 
     // Keep local heightmap window centered around the editor camera when flying across continents
     if (Math.hypot(camera.position.x - hmCenterX, camera.position.z - hmCenterZ) > 1450.0) {
@@ -1763,6 +1793,139 @@ function createAtlantisMistRing(scene) {
     }
 
     scene.add(atlantisMistGroup);
+}
+
+// ==========================================
+// LEVEL EDITOR HORIZONTAL PLANETARY COMPASS & RADAR
+// ==========================================
+let compassCardinalEls = [];
+let compassPoiEls = [];
+
+const EDITOR_COMPASS_POIS = [
+    { key: "tigris",    icon: "🔥", label: "Tigri/Eufrate", x: 14200.0,  z: -13775.0 },
+    { key: "ararat",    icon: "🏔️", label: "M. Ararat",     x: 14755.0,  z: -14325.0 },
+    { key: "gibraltar", icon: "🏛️", label: "Gibilterra",    x: -2100.0,  z: -12520.0 },
+    { key: "atlantis",  icon: "👑", label: "Atlantide",     x: -10800.0, z: -10600.0 }
+];
+
+function initEditorCompass() {
+    const track = document.getElementById("editor-compass-track");
+    if (!track) return;
+    track.innerHTML = "";
+    compassCardinalEls = [];
+    compassPoiEls = [];
+
+    const dirs = [
+        { deg: 0,   text: "N",  cardinal: true },
+        { deg: 45,  text: "NE", cardinal: false },
+        { deg: 90,  text: "E",  cardinal: true },
+        { deg: 135, text: "SE", cardinal: false },
+        { deg: 180, text: "S",  cardinal: true },
+        { deg: 225, text: "SO", cardinal: false },
+        { deg: 270, text: "O",  cardinal: true },
+        { deg: 315, text: "NO", cardinal: false }
+    ];
+
+    for (const d of dirs) {
+        const el = document.createElement("div");
+        el.className = "compass-tick" + (d.cardinal ? " cardinal" : "");
+        el.textContent = d.text;
+        track.appendChild(el);
+        compassCardinalEls.push({ deg: d.deg, el });
+    }
+
+    for (const poi of EDITOR_COMPASS_POIS) {
+        const el = document.createElement("div");
+        el.className = "compass-poi";
+        el.title = `Clicca per viaggiare a: ${poi.label}`;
+        el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (poi.key === "ararat") {
+                playerPos.set(14755.0, 275.0, -14180.0);
+                camYaw = 0.0;
+                camPitch = -0.18;
+                recenterEditorHeightmap(14755.0, -14180.0);
+                showToast("Viaggio Rapido: 🏔️ Vetta del Monte Ararat");
+            } else if (window.teleportEditorToRegion) {
+                window.teleportEditorToRegion(poi.key);
+            }
+        });
+        track.appendChild(el);
+        compassPoiEls.push({ poi, el });
+    }
+
+    const timeBtn = document.getElementById("compass-time-btn");
+    if (timeBtn) {
+        timeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (worldRealism) {
+                const tInfo = worldRealism.advanceTimeHours(3.0);
+                showToast(`Ciclo Giorno/Notte: ${tInfo.text} (${tInfo.label})`);
+            }
+        });
+    }
+}
+
+function updateEditorCompass() {
+    const track = document.getElementById("editor-compass-track");
+    if (!track || !camera) return;
+
+    // Forward horizontal direction of camera:
+    // North = -Z (0°), East = +X (90°), South = +Z (180°), West = -X (270°)
+    const lookDir = new THREE.Vector3();
+    camera.getWorldDirection(lookDir);
+    let headingDeg = THREE.MathUtils.radToDeg(Math.atan2(lookDir.x, -lookDir.z));
+    if (headingDeg < 0) headingDeg += 360.0;
+
+    const fovSpanDeg = 130.0; // Visible degree span across the 520px compass ribbon
+
+    const shortestAngleDiff = (targetDeg, currentDeg) => {
+        let diff = (targetDeg - currentDeg + 540.0) % 360.0 - 180.0;
+        return diff;
+    };
+
+    for (let i = 0; i < compassCardinalEls.length; i++) {
+        const item = compassCardinalEls[i];
+        const diff = shortestAngleDiff(item.deg, headingDeg);
+        if (Math.abs(diff) <= fovSpanDeg * 0.55) {
+            const pct = 50.0 + (diff / fovSpanDeg) * 100.0;
+            item.el.style.display = "block";
+            item.el.style.left = `${pct}%`;
+        } else {
+            item.el.style.display = "none";
+        }
+    }
+
+    for (let i = 0; i < compassPoiEls.length; i++) {
+        const item = compassPoiEls[i];
+        const dx = item.poi.x - camera.position.x;
+        const dz = item.poi.z - camera.position.z;
+        const distM = Math.hypot(dx, dz);
+        let poiDeg = THREE.MathUtils.radToDeg(Math.atan2(dx, -dz));
+        if (poiDeg < 0) poiDeg += 360.0;
+
+        const diff = shortestAngleDiff(poiDeg, headingDeg);
+        const clampedDiff = Math.max(-fovSpanDeg * 0.46, Math.min(fovSpanDeg * 0.46, diff));
+        const pct = 50.0 + (clampedDiff / fovSpanDeg) * 100.0;
+
+        const distText = distM >= 1000.0 ? `${(distM / 1000.0).toFixed(1)}km` : `${Math.round(distM)}m`;
+        item.el.textContent = `${item.poi.icon} ${item.poi.label} (${distText})`;
+        item.el.style.left = `${pct}%`;
+        item.el.style.opacity = Math.abs(diff) <= fovSpanDeg * 0.48 ? "1.0" : "0.52";
+    }
+
+    const headingEl = document.getElementById("compass-heading-text");
+    if (headingEl) {
+        const cardNames = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+        const cardIdx = Math.round(headingDeg / 45.0) % 8;
+        headingEl.textContent = `${Math.round(headingDeg)}° ${cardNames[cardIdx]}`;
+    }
+
+    const timeBtn = document.getElementById("compass-time-btn");
+    if (timeBtn && worldRealism) {
+        const tInfo = worldRealism.getFormattedTimeOfDay();
+        timeBtn.textContent = `${tInfo.text} [N]`;
+    }
 }
 
 // Start Level Builder
