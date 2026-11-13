@@ -10,8 +10,12 @@ import * as THREE from 'three';
  *  - Tempio Sacro di Poseidone e Clito, Fonti Sacre, Reggia Imperiale & Ponti Monumentali sui Canali Concentrici.
  */
 export function createAtlantisCapital(scene, terrain) {
+    const ATLANTIS_X = (terrain && terrain.atlantisCenter) ? terrain.atlantisCenter.x : -10800.0;
+    const ATLANTIS_Z = (terrain && terrain.atlantisCenter) ? terrain.atlantisCenter.z : -10600.0;
+
     const group = new THREE.Group();
     group.name = 'AtlantisCapitalGroup';
+    group.position.set(ATLANTIS_X, 0, ATLANTIS_Z);
 
     const sharedUniforms = {
         uTime: { value: 0.0 },
@@ -46,9 +50,9 @@ export function createAtlantisCapital(scene, terrain) {
         return material;
     }
 
-    // Exact analytical surface height in meters at world (wx, wz)
-    function sampleGroundY(wx, wz) {
-        return terrain.getEstimatedSurfaceHeight(wx / 3.0, wz / 3.0) * 3.0;
+    // Exact analytical surface height in meters at local Cleito offset (lx, lz)
+    function sampleGroundY(lx, lz) {
+        return terrain.getEstimatedSurfaceHeight((lx + ATLANTIS_X) / 3.0, (lz + ATLANTIS_Z) / 3.0) * 3.0;
     }
 
     // =========================================================================
@@ -724,11 +728,18 @@ export function createAtlantisCapital(scene, terrain) {
     }
 
     scene.add(group);
+    group.updateMatrixWorld(true);
 
     // =========================================================================
     // 7. ANALYTICAL COLLISION & WALKABLE SURFACES (O(1) ZERO-LAG PHYSICS)
     // =========================================================================
-    function getWalkableSurfaceHeight(x, z, feetY) {
+    function getWalkableSurfaceHeight(worldX, worldZ, feetY) {
+        const x = worldX - ATLANTIS_X;
+        const z = worldZ - ATLANTIS_Z;
+        if (Math.abs(x) > 2500.0 || Math.abs(z) > 2500.0) {
+            return -Infinity;
+        }
+
         let bestY = -Infinity;
 
         // 1. Temple of Poseidon & Cleito Stylobate (|x| <= 23, |z| <= 35)
@@ -769,41 +780,53 @@ export function createAtlantisCapital(scene, terrain) {
 
     function resolvePlayerCollision(pos, playerHeight, isFlying) {
         if (isFlying) return;
+        let lx = pos.x - ATLANTIS_X;
+        let lz = pos.z - ATLANTIS_Z;
+        if (Math.abs(lx) > 2500.0 || Math.abs(lz) > 2500.0) return;
+
         const feetY = pos.y - playerHeight;
         const playerRad = 0.55;
 
         // Radial sliding collision against the 4 Concentric Metallic Walls (except at Gateways & Canal!)
-        const r = Math.hypot(pos.x, pos.z);
+        const r = Math.hypot(lx, lz);
         if (r > 1.0) {
             for (const spec of wallSpecs) {
                 const halfT = spec.thickness * 0.5 + playerRad;
-                if (Math.abs(r - spec.radius) < halfT && !isAngleInWallGap(pos.x, pos.z, spec)) {
-                    const gY = Math.max(119.5, sampleGroundY(pos.x, pos.z));
+                if (Math.abs(r - spec.radius) < halfT && !isAngleInWallGap(lx, lz, spec)) {
+                    const gY = Math.max(119.5, sampleGroundY(lx, lz));
                     const wallTop = gY + spec.wallHeight;
                     if (feetY < wallTop - 1.2) {
                         const targetR = (r >= spec.radius) ? (spec.radius + halfT) : (spec.radius - halfT);
                         const scale = targetR / r;
-                        pos.x *= scale;
-                        pos.z *= scale;
+                        lx *= scale;
+                        lz *= scale;
+                        pos.x = ATLANTIS_X + lx;
+                        pos.z = ATLANTIS_Z + lz;
                     }
                 }
             }
         }
 
-        // Temple inner Cella walls (|x| < 11.5, |z| < 20.5)
+        // Temple inner Cella walls (|lx| < 11.5, |lz| < 20.5)
         const cw = 11.5 + playerRad, cl = 20.5 + playerRad;
-        if (Math.abs(pos.x) < cw && Math.abs(pos.z) < cl && feetY < templeBaseY + 16.0) {
-            const penX = cw - Math.abs(pos.x);
-            const penZ = cl - Math.abs(pos.z);
+        if (Math.abs(lx) < cw && Math.abs(lz) < cl && feetY < templeBaseY + 16.0) {
+            const penX = cw - Math.abs(lx);
+            const penZ = cl - Math.abs(lz);
             if (penX < penZ) {
-                pos.x = (pos.x >= 0 ? cw : -cw);
+                lx = (lx >= 0 ? cw : -cw);
             } else {
-                pos.z = (pos.z >= 0 ? cl : -cl);
+                lz = (lz >= 0 ? cl : -cl);
             }
+            pos.x = ATLANTIS_X + lx;
+            pos.z = ATLANTIS_Z + lz;
         }
     }
 
     function update(delta, cameraPos, activeChunkRadius) {
+        const distToAtlantis = Math.hypot(cameraPos.x - ATLANTIS_X, cameraPos.z - ATLANTIS_Z);
+        group.visible = (distToAtlantis < 12000.0);
+        if (!group.visible) return;
+
         sharedUniforms.uTime.value += delta;
         sharedUniforms.uCameraPos.value.copy(cameraPos);
         sharedUniforms.uChunkHideRadius.value = Math.max(400.0, activeChunkRadius - 75.0);

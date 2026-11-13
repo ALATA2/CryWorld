@@ -656,8 +656,8 @@
         <!-- Top Row -->
         <div class="hud-header">
             <div class="hud-card stats-card">
-                <div class="stat-item">🌋 <span id="pos-info">X: 0 Y: 0 Z: 0</span></div>
-                <div class="stat-item"><span id="biome-info" style="color: #00e5ff; font-weight: bold;">🔥 ACROPOLI CENTRALE &amp; REGGIA (MURO DI ORICALCO)</span></div>
+                <div class="stat-item">🌋 <span id="pos-info">X: 14200 Y: 58 Z: -13775</span></div>
+                <div class="stat-item"><span id="biome-info" style="color: #00e5ff; font-weight: bold;">🏔️ SORGENTI DEL TIGRI E DELL'EUFRATE (ALTOPIANO DEL TAURO)</span></div>
                 <div class="stat-item"><span id="mode-badge" class="mode-badge">🛠️ LIVE LEVEL BUILDER</span></div>
                 <div class="stat-item"><span id="fly-info" style="color: #ffeb3b; font-weight: bold;">🛸 DRONE FLY</span></div>
                 <div class="stat-item"><span id="mod-counter" style="color: #00e676; font-family: monospace;">Mods: 0</span></div>
@@ -755,7 +755,7 @@
             FPS: <span id="fps-counter">60</span>
         </div>
         <div class="hud-card version-card">
-            V 0.209
+            V 0.210
         </div>
         <div class="hud-card altimeter-card" id="altimeter-card">
             ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -767,7 +767,7 @@
 
     <!-- Initial Click-to-Play Blocker Overlay matching Gameplay -->
     <div id="blocker">
-        <div id="homepage-version">V 0.209</div>
+        <div id="homepage-version">V 0.210</div>
         <div id="instructions">
             <h2>LEVEL BUILDER 3D</h2>
             <p class="subtitle">Editor Sandbox Integrato nel Mondo di Gioco</p>
@@ -783,6 +783,7 @@
                     <li><span class="key">Click DX</span> &nbsp; <b>Scava / Alterna</b> (Rimuovi voxel o vegetazione)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Seleziona strumento Hotbar</li>
                     <li><span class="key">Rotellina</span> o <span class="key">[</span> <span class="key">]</span> &nbsp; Modifica raggio pennello</li>
+                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide</li>
                     <li><span class="key">F</span> &nbsp; Alterna Volo Drone / A Piedi</li>
                     <li><span class="key">P</span> &nbsp; <b>Gioca Subito</b> (Testa istantaneamente la mappa)</li>
                     <li><span class="key">ESC</span> &nbsp; Menu Opzioni / Salva / Importa</li>
@@ -795,10 +796,13 @@
     <div id="editor-modal" class="hidden">
         <div class="confirm-box">
             <h3>⚙️ MENU LIVELLO</h3>
-            <p>Salva, esporta o gioca subito la mappa personalizzata</p>
+            <p>Salva, esporta, viaggia tra i continenti o gioca subito la mappa</p>
             <div class="modal-buttons">
                 <button class="modal-btn primary" id="modal-resume">▶️ RIPRENDI EDITING [ESC]</button>
                 <button class="modal-btn primary" style="background: linear-gradient(135deg, #ff7b00, #ffae00);" id="modal-play">🎮 GIOCA QUESTA MAPPA [P]</button>
+                <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('tigris')">🏔️ [F6] VAI ALLE SORGENTI TIGRI &amp; EUFRATE</button>
+                <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('gibraltar')">🏛️ [F7] VAI ALLE COLONNE D'ERCOLE</button>
+                <button class="modal-btn secondary" onclick="window.teleportEditorToRegion && window.teleportEditorToRegion('atlantis')">👑 [F8] VAI A CLEITO (ATLANTIDE)</button>
                 <button class="modal-btn secondary" id="modal-export">💾 ESPORTA FILE JSON</button>
                 <button class="modal-btn secondary" id="modal-import">📂 IMPORTA FILE JSON</button>
                 <button class="modal-btn danger" id="modal-reset">🔄 RIPRISTINA MAPPA NATURALE</button>
@@ -811,6 +815,6 @@
     <div id="toast" class="music-toast hidden">Mappa salvata con successo!</div>
     <input type="file" id="file-input" accept=".json">
 
-    <script type="module" src="editor.js?v=0.209"></script>
+    <script type="module" src="editor.js?v=0.210"></script>
 </body>
 </html>

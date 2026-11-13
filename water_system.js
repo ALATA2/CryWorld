@@ -13,12 +13,18 @@ export class WaterSystem {
         this.voxelScale = 3.0;
         this.seaLevel = 120.0;
 
-        // Limiti della maschera 2D centrata simmetricamente sulla Capitale 4x di Atlantide/Cleito (5120m x 5120m)
-        this.maskMinX = -2560.0;
-        this.maskMinZ = -2560.0;
+        // Limiti della maschera 2D centrata dinamicamente sulla regione attiva del giocatore (5120m x 5120m)
+        const initX = (camera && Number.isFinite(camera.position.x) && (camera.position.x !== 0 || camera.position.z !== 0))
+            ? camera.position.x
+            : ((terrain && terrain.tigrisSpawn) ? terrain.tigrisSpawn.x : 14200.0);
+        const initZ = (camera && Number.isFinite(camera.position.z) && (camera.position.x !== 0 || camera.position.z !== 0))
+            ? camera.position.z
+            : ((terrain && terrain.tigrisSpawn) ? terrain.tigrisSpawn.z : -13800.0);
         this.maskSize = 5120.0;
         this.maskRes = 512;
         this.maskTexelSize = this.maskSize / this.maskRes; // 10.0 metri per texel
+        this.maskMinX = initX - this.maskSize * 0.5;
+        this.maskMinZ = initZ - this.maskSize * 0.5;
 
         // Texture di mascheratura per il mare globale
         // 0 = Terraferma asciutta (il piano dell'oceano a 120m viene scartato nello shader)
@@ -85,6 +91,44 @@ export class WaterSystem {
         this.maskTexture.needsUpdate = true;
 
         console.log(`[WaterSystem] Mask texture 512x512 creata in ${(performance.now() - start).toFixed(1)}ms`);
+    }
+
+    /**
+     * Ricentra dinamicamente la finestra 5120m x 5120m della maschera dell'acqua
+     * attorno alla posizione corrente del giocatore (es. Mesopotamia, Gibilterra o Atlantide).
+     */
+    recenterMask(centerX, centerZ) {
+        this.maskMinX = centerX - this.maskSize * 0.5;
+        this.maskMinZ = centerZ - this.maskSize * 0.5;
+        const halfStep = this.maskTexelSize * 0.5;
+
+        for (let tz = 0; tz < this.maskRes; tz++) {
+            const wz = this.maskMinZ + tz * this.maskTexelSize + halfStep;
+            const vz = Math.round(wz / this.voxelScale);
+
+            for (let tx = 0; tx < this.maskRes; tx++) {
+                const wx = this.maskMinX + tx * this.maskTexelSize + halfStep;
+                const vx = Math.round(wx / this.voxelScale);
+                const idx = tx + tz * this.maskRes;
+
+                if (this.terrain.getBaseDensity(vx, 40, vz) <= 1.45) {
+                    this.maskData[idx] = 255;
+                } else {
+                    this.maskData[idx] = 0;
+                }
+            }
+        }
+
+        // Riapplica eventuali canali già allagati all'interno della nuova finestra
+        if (this.floodedCells && this.floodedCells.size > 0) {
+            for (const cell of this.floodedCells) {
+                this.setMaskTexel(cell.vx, cell.vz, 255);
+            }
+        }
+
+        if (this.maskTexture) {
+            this.maskTexture.needsUpdate = true;
+        }
     }
 
     /**

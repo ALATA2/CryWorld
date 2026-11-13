@@ -656,20 +656,24 @@
 
     <!-- ESC Pause Menu Modal -->
     <div id="esc-confirm" class="hidden">
-        <div class="confirm-box" style="min-width: 320px; border-color: #00d2ff; box-shadow: 0 0 35px rgba(0, 210, 255, 0.35);">
+        <div class="confirm-box" style="min-width: 360px; max-width: 440px; border-color: #00d2ff; box-shadow: 0 0 35px rgba(0, 210, 255, 0.35);">
             <h3 style="color: #00d2ff; margin-bottom: 6px;">PAUSA</h3>
-            <p style="margin-bottom: 18px; color: #a5c7db; font-size: 0.92rem;">Opzioni di gioco</p>
-            <div class="confirm-buttons" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-                <button id="btn-pause-resume" class="play-btn" style="width: 100%; padding: 12px; font-size: 0.95rem; background: linear-gradient(135deg, #00d2ff, #0066ff); box-shadow: 0 4px 15px rgba(0, 150, 255, 0.4);">▶️ RIPRENDI GIOCO</button>
-                <button id="btn-pause-music" class="play-btn" style="width: 100%; padding: 12px; font-size: 0.95rem; background: rgba(0, 210, 255, 0.15); border: 1.5px solid #00d2ff; color: #80e5ff; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.2);">🎵 MUSICA: ON (Premi M)</button>
-                <button id="btn-confirm-yes" class="confirm-btn yes-btn" style="width: 100%; padding: 10px; font-size: 0.85rem; background: rgba(255, 60, 60, 0.2); border: 1px solid rgba(255, 60, 60, 0.4); color: #ff9999; box-shadow: none;">🚪 TORNA AL MENU</button>
+            <p style="margin-bottom: 14px; color: #a5c7db; font-size: 0.92rem;">Opzioni di gioco &amp; Viaggio Rapido Planetario</p>
+            <div class="confirm-buttons" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                <button id="btn-pause-resume" class="play-btn" style="width: 100%; padding: 11px; font-size: 0.95rem; background: linear-gradient(135deg, #00d2ff, #0066ff); box-shadow: 0 4px 15px rgba(0, 150, 255, 0.4);">▶️ RIPRENDI GIOCO</button>
+                <div style="margin: 4px 0 2px 0; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; color: #ffae00; text-transform: uppercase;">🌍 Viaggio Rapido (Tasti F6 / F7 / F8)</div>
+                <button onclick="window.teleportToRegion && window.teleportToRegion('tigris')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(0, 230, 118, 0.16); border: 1.5px solid #00e676; color: #b9f6ca; box-shadow: none;">🏔️ [F6] SORGENTI DEL TIGRI &amp; EUFRATE (Spawn)</button>
+                <button onclick="window.teleportToRegion && window.teleportToRegion('gibraltar')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(255, 174, 0, 0.16); border: 1.5px solid #ffae00; color: #ffe082; box-shadow: none;">🏛️ [F7] COLONNE D'ERCOLE (Stretto di Gibilterra)</button>
+                <button onclick="window.teleportToRegion && window.teleportToRegion('atlantis')" class="play-btn" style="width: 100%; padding: 9px 12px; font-size: 0.82rem; background: rgba(0, 210, 255, 0.18); border: 1.5px solid #00d2ff; color: #84ffff; box-shadow: none;">👑 [F8] CLEITO — CAPITALE DI ATLANTIDE (Oceano Atlantico)</button>
+                <button id="btn-pause-music" class="play-btn" style="width: 100%; padding: 10px; font-size: 0.9rem; background: rgba(0, 210, 255, 0.15); border: 1.5px solid #00d2ff; color: #80e5ff; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.2);">🎵 MUSICA: ON (Premi M)</button>
+                <button id="btn-confirm-yes" class="confirm-btn yes-btn" style="width: 100%; padding: 9px; font-size: 0.85rem; background: rgba(255, 60, 60, 0.2); border: 1px solid rgba(255, 60, 60, 0.4); color: #ff9999; box-shadow: none;">🚪 TORNA AL MENU</button>
             </div>
         </div>
     </div>
 
     <!-- Blocker Overlay for Pointer Lock -->
     <div id="blocker">
-        <div id="homepage-version">V 0.209</div>
+        <div id="homepage-version">V 0.210</div>
         <div id="instructions">
             <h2>ARCHIPELAGO</h2>
             <p class="subtitle">3D Sandbox Digger - Marching Cubes Terrain</p>
@@ -687,8 +691,9 @@
                     <li><span class="key">Click SX</span> &nbsp; <b>Scava</b> il terreno (Rimuovi voxel)</li>
                     <li><span class="key">Click DX</span> &nbsp; <b>Crea</b> il terreno (Aggiungi voxel)</li>
                     <li><span class="key">1</span> - <span class="key">8</span> &nbsp; Cambia equipaggiamento (Hotbar)</li>
+                    <li><span class="key">F6</span> <span class="key">F7</span> <span class="key">F8</span> &nbsp; <b>Viaggio Rapido</b>: Tigri/Eufrate • Gibilterra • Atlantide</li>
                     <li><span class="key">M</span> &nbsp; Musica ON / OFF (oppure da menu Pausa ESC)</li>
-                    <li><span class="key">ESC</span> &nbsp; Menu di Pausa / Uscita</li>
+                    <li><span class="key">ESC</span> &nbsp; Menu di Pausa / Viaggio Rapido / Uscita</li>
                 </ul>
             </div>
         </div>
@@ -702,7 +707,7 @@
         <!-- Top Row -->
         <div class="hud-header">
             <div class="hud-card stats-card">
-                <div class="stat-item">🌋 <span id="pos-info">X: 0 Y: 0 Z: 0</span> <span id="biome-info" style="margin-left: 15px; color: #00e5ff; font-weight: bold;">🔥 ACROPOLI CENTRALE &amp; REGGIA (MURO DI ORICALCO)</span> <span id="fly-info" style="margin-left: 15px; color: #ffeb3b; font-weight: bold; display: none;">🛸 FLYING</span></div>
+                <div class="stat-item">🌋 <span id="pos-info">X: 14200 Y: 18 Z: -13775</span> <span id="biome-info" style="margin-left: 15px; color: #00e5ff; font-weight: bold;">🏔️ SORGENTI DEL TIGRI E DELL'EUFRATE (ALTOPIANO DEL TAURO)</span> <span id="fly-info" style="margin-left: 15px; color: #ffeb3b; font-weight: bold; display: none;">🛸 FLYING</span></div>
             </div>
         </div>
 
@@ -715,7 +720,7 @@
                 FPS: <span id="fps-counter">60</span>
             </div>
             <div class="hud-card version-card" style="background: rgba(16, 26, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); color: #00d2ff; font-weight: bold; font-family: monospace; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; backdrop-filter: blur(8px);">
-                V 0.209
+                V 0.210
             </div>
             <div id="altimeter-card" class="hud-card altimeter-card" style="display: none;">
                 ✈️ ALT: <span id="alt-counter">0 m</span>
@@ -776,6 +781,6 @@
     </div>
 
     <!-- Game Logic -->
-    <script type="module" src="main.js?v=0.209"></script>
+    <script type="module" src="main.js?v=0.210"></script>
 </body>
 </html>

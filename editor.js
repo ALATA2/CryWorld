@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { VoxelTerrain } from "./marching_cubes.js?v=0.209";
-import { createAtlantisCapital } from "./atlantis_capital.js?v=0.209";
+import { VoxelTerrain } from "./marching_cubes.js?v=0.210";
+import { createAtlantisCapital } from "./atlantis_capital.js?v=0.210";
 
 // ==========================================
 // EDITOR GAMEPLAY STATE & GLOBALS
@@ -11,6 +11,8 @@ let scene, camera, renderer, clock;
 let terrain, water, sky, sun;
 let atlantisMistGroup = null, atlantisMistUniforms = null, atlantisCapital = null;
 let heightmapData = null, heightmapTexture = null;
+let hmCenterX = 14200.0, hmCenterZ = -13800.0;
+const hmBoundsUniform = { value: new THREE.Vector4(14200.0 - 2611.2, -13800.0 - 2611.2, 5222.4, 5222.4) };
 let raycaster;
 let brushRing, brushDisc;
 let brushTargetPos = new THREE.Vector3();
@@ -22,12 +24,12 @@ let isPointerLocked = false;
 let isLeftMouseDown = false;
 let isRightMouseDown = false;
 let keyStates = {};
-let camYaw = 0;
+let camYaw = 3.08;
 let camPitch = -0.22;
-let playerPos = new THREE.Vector3(46, 168, 120); // Panoramic drone view over Sacred Mountain, Grand Canal & 3 Rings
+let playerPos = new THREE.Vector3(14200, 178, -13775); // Panoramic drone view over Tigris & Euphrates Headwaters & Mesopotamia
 let playerVelocity = new THREE.Vector3();
 let camMode = "drone"; // "drone" (freecam fly), "walk" (grounded FPS physics), "topdown"
-let savedDronePos = new THREE.Vector3(46, 168, 120);
+let savedDronePos = new THREE.Vector3(14200, 178, -13775);
 let savedDronePitch = -0.22;
 let isGrounded = false;
 
@@ -285,6 +287,7 @@ function init() {
     const cameraPosUniform = { value: new THREE.Vector3() };
     water.material.uniforms["cameraPos"] = cameraPosUniform;
     water.material.uniforms["heightmapTexture"] = { value: null };
+    water.material.uniforms["hmBounds"] = hmBoundsUniform;
     water.material.vertexShader = `
         uniform vec3 cameraPos;
     ` + water.material.vertexShader;
@@ -310,6 +313,7 @@ function init() {
     water.material.fragmentShader = `
         uniform vec3 cameraPos;
         uniform sampler2D heightmapTexture;
+        uniform vec3 hmBounds;
         float wHash21(vec2 p) {
             p = fract(p * vec2(127.1, 311.7));
             p += dot(p, p + 34.5);
@@ -339,9 +343,10 @@ function init() {
         "gl_FragColor = vec4( outgoingLight, alpha );",
         `float distAlpha = alpha;
          vec3 finalColor = outgoingLight;
+         vec2 wPosMod = mod(worldPosition.xz, 4096.0);
          if (eye.y >= worldPosition.y) {
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-2611.2, -2611.2)) / 5222.4;
+             vec2 hmUV = (worldPosition.xz - (hmBounds.xy - vec2(hmBounds.z * 0.5))) / hmBounds.z;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -362,8 +367,8 @@ function init() {
              vec3 waterBody = mix(ultraShallowTurq, midLagoonCyan, smoothstep(1.2, 4.8, waterDepth));
              waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(4.2, 11.0, waterDepth));
 
-             float reefMacro  = wFbm(worldPosition.xz * 0.048);
-             float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
+             float reefMacro  = wFbm(wPosMod * 0.048);
+             float reefDetail = wFbm(wPosMod * 0.19 + 5.7);
              float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
                               * smoothstep(0.55, 1.75, waterDepth)
                               * (1.0 - smoothstep(5.0, 8.8, waterDepth));
@@ -376,7 +381,7 @@ function init() {
              float NdotH = max(0.0, dot(surfaceNormal, halfVec));
              finalColor += vec3(1.0, 0.90, 0.66) * (pow(NdotH, 260.0) * 2.4 + pow(NdotH, 72.0) * 0.20);
 
-             float foamNoise = wFbm(worldPosition.xz * 0.62 + vec2(time * 0.48, -time * 0.34));
+             float foamNoise = wFbm(wPosMod * 0.62 + vec2(time * 0.48, -time * 0.34));
              float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);
              float shoreLace = smoothstep(0.62, 0.06, waterDepth)
                              * smoothstep(0.0, 0.05, waterDepth)
@@ -396,10 +401,10 @@ function init() {
              distAlpha = max(distAlpha, surfWhite * 0.72);
 
              // Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 2400m .. 2880m)
-             float rAtlantisW = length(worldPosition.xz);
+             float rAtlantisW = length(worldPosition.xz - vec2(-10800.0, -10600.0));
              float seaMistBand = smoothstep(2400.0, 2530.0, rAtlantisW) * (1.0 - smoothstep(2740.0, 2880.0, rAtlantisW));
              if (seaMistBand > 0.001) {
-                 float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
+                 float mistSwirl = wFbm(wPosMod * 0.014 + vec2(time * 0.18, -time * 0.12));
                  float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
                  finalColor = mix(finalColor, vec3(0.84, 0.94, 0.99), mistAmt * 0.88);
                  distAlpha = max(distAlpha, mistAmt * 0.95);
@@ -561,6 +566,18 @@ function setupEvents() {
         // Quick Play Map: 'P'
         if (e.code === "KeyP") {
             quickPlay();
+        }
+
+        // Fast Travel to Key Planetary Hubs: F6 / F7 / F8
+        if (e.code === "F6") {
+            e.preventDefault();
+            window.teleportEditorToRegion("tigris");
+        } else if (e.code === "F7") {
+            e.preventDefault();
+            window.teleportEditorToRegion("gibraltar");
+        } else if (e.code === "F8") {
+            e.preventDefault();
+            window.teleportEditorToRegion("atlantis");
         }
 
         // Quick Save: Ctrl + S
@@ -853,12 +870,46 @@ function applyActiveTool(actionType = "primary") {
     saveToLocalStorage();
 }
 
+function recenterEditorHeightmap(cx, cz) {
+    hmCenterX = Math.round(cx / 100.0) * 100.0;
+    hmCenterZ = Math.round(cz / 100.0) * 100.0;
+    hmBoundsUniform.value.set(hmCenterX, hmCenterZ, 5222.4);
+    updateHeightmap();
+}
+
+window.teleportEditorToRegion = function(regionKey) {
+    const destinations = {
+        tigris: {
+            x: 14200.0, y: 178.0, z: -13775.0, yaw: 3.08, pitch: -0.22,
+            label: "🏔️ SORGENTI DEL TIGRI E DELL'EUFRATE (Mesopotamia)"
+        },
+        gibraltar: {
+            x: -2100.0, y: 175.0, z: -12520.0, yaw: 1.57, pitch: -0.18,
+            label: "🏛️ COLONNE D'ERCOLE (Stretto di Gibilterra)"
+        },
+        atlantis: {
+            x: -10722.0, y: 215.0, z: -10845.0, yaw: 0.42, pitch: -0.24,
+            label: "👑 CLEITO — CAPITALE DI ATLANTIDE (Centro Oceano Atlantico)"
+        }
+    };
+    const dest = destinations[regionKey] || destinations.tigris;
+    playerPos.set(dest.x, dest.y, dest.z);
+    camYaw = dest.yaw;
+    camPitch = dest.pitch;
+    recenterEditorHeightmap(dest.x, dest.z);
+    if (terrain) {
+        terrain.updateChunksAroundPlayer(playerPos, 540, true);
+        terrain.update();
+    }
+    showToast(`Viaggio Rapido: ${dest.label}`);
+};
+
 function updateHeightmap(nearPos, radius) {
     if (!terrain || !heightmapData) return;
     const width = 768;
     const depth = 768;
-    const minWorldX = -2611.2;
-    const minWorldZ = -2611.2;
+    const minWorldX = hmCenterX - 2611.2;
+    const minWorldZ = hmCenterZ - 2611.2;
     const texelSize = 6.8;
     const scale = 3.0;
 
@@ -1430,7 +1481,7 @@ function animate() {
     if (terrain.getPlanetaryAtmosphereColor) {
         baseAtmo = terrain.getPlanetaryAtmosphereColor(camera.position.x, camera.position.y, camera.position.z);
     }
-    const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
+    const camDistCenter = Math.hypot(camera.position.x - (-10800.0), camera.position.z - (-10600.0));
     let mistImmerse = 0.0;
     if (camDistCenter > 2400.0 && camDistCenter < 2880.0 && camera.position.y < 360.0) {
         const rBand = Math.sin(((camDistCenter - 2400.0) / 480.0) * Math.PI);
@@ -1442,6 +1493,11 @@ function animate() {
     scene.background.lerp(targetFogCol, 0.12);
     scene.fog.near = THREE.MathUtils.lerp(1950.0, 16.0, mistImmerse);
     scene.fog.far  = THREE.MathUtils.lerp(4100.0, 155.0, mistImmerse);
+
+    // Keep local heightmap window centered around the editor camera when flying across continents
+    if (Math.hypot(camera.position.x - hmCenterX, camera.position.z - hmCenterZ) > 1450.0) {
+        recenterEditorHeightmap(camera.position.x, camera.position.z);
+    }
 
     if (atlantisMistUniforms) {
         atlantisMistUniforms.uTime.value += delta;
@@ -1543,6 +1599,7 @@ function animate() {
 // ==========================================
 function createAtlantisMistRing(scene) {
     atlantisMistGroup = new THREE.Group();
+    atlantisMistGroup.position.set(-10800.0, 0, -10600.0);
     atlantisMistUniforms = {
         uTime: { value: 0.0 },
         uCameraPos: { value: new THREE.Vector3() }
@@ -1604,7 +1661,8 @@ function createAtlantisMistRing(scene) {
             }
 
             void main() {
-                float theta = atan(vWorldPos.z, vWorldPos.x);
+                vec2 relMist = vWorldPos.xz - vec2(-10800.0, -10600.0);
+                float theta = atan(relMist.y, relMist.x);
                 float hRel = vWorldPos.y - 120.0;
                 if (hRel < -2.0) discard;
 

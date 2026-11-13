@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { VoxelTerrain } from './marching_cubes.js?v=0.209';
-import { WaterSystem } from './water_system.js?v=0.209';
-import { createAtlantisCapital } from './atlantis_capital.js?v=0.209';
+import { VoxelTerrain } from './marching_cubes.js?v=0.210';
+import { WaterSystem } from './water_system.js?v=0.210';
+import { createAtlantisCapital } from './atlantis_capital.js?v=0.210';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
@@ -12,6 +12,8 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 // ==========================================
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun, dirLight, heightmapTexture, heightmapData, waterSystem;
+let hmCenterX = 14200.0, hmCenterZ = -13800.0;
+const hmBoundsUniform = { value: new THREE.Vector4(14200.0 - 2611.2, -13800.0 - 2611.2, 5222.4, 5222.4) };
 let lastShadowSnapX = 1e9, lastShadowSnapZ = 1e9, prevShadowQueueLen = 0;
 const cameraPosUniform = { value: new THREE.Vector3() };
 let controls;
@@ -415,11 +417,13 @@ function init() {
     );
 
     // Bathymetric Turquoise Lagoon, Coral Reef Shadows, Shoreline Foam & Planetary Limb Glow
+    water.material.uniforms['hmBounds'] = hmBoundsUniform;
     water.material.fragmentShader = `
         uniform vec3 cameraPos;
         uniform sampler2D waterMaskTexture;
         uniform vec4 waterMaskBounds;
         uniform sampler2D heightmapTexture;
+        uniform vec4 hmBounds;
 
         float wHash21(vec2 p) {
             p = fract(p * vec2(127.1, 311.7));
@@ -461,11 +465,12 @@ function init() {
 
          float distAlpha = alpha;
          vec3 finalColor = outgoingLight;
+         vec2 wPosMod = mod(worldPosition.xz, 4096.0);
 
          if (eye.y >= worldPosition.y) {
-             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy symmetrically centered on 4.8km Atlantis)
+             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy dynamically centered on active region)
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-2611.2, -2611.2)) / 5222.4;
+             vec2 hmUV = (worldPosition.xz - hmBounds.xy) / hmBounds.zw;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -473,7 +478,7 @@ function init() {
                  waterDepth = mix(25.5, hmSample, hmEdge);
              }
 
-             // 2. Photorealistic Coral-Reef Lagoon Optics (Electric Turquoise Shallows, Living Coral Patches & Deep Sapphire)
+             // 2. Photorealistic Coral-Reef Lagoon & River Optics (Electric Turquoise Shallows, Living Coral Patches & Deep Sapphire)
              vec3 sunDirN = normalize(sunDirection);
              vec3 viewDir = normalize(eye - worldPosition.xyz);
              float NdotV  = clamp(dot(surfaceNormal, viewDir), 0.0, 1.0);
@@ -490,8 +495,8 @@ function init() {
              waterBody      = mix(waterBody, deepRoyalCobalt, smoothstep(4.2, 11.0, waterDepth));
 
              // Procedural Living Coral Reef Heads & Mottled Reef Shadows (0.55m .. 8.5m depth)
-             float reefMacro  = wFbm(worldPosition.xz * 0.048);
-             float reefDetail = wFbm(worldPosition.xz * 0.19 + 5.7);
+             float reefMacro  = wFbm(wPosMod * 0.048);
+             float reefDetail = wFbm(wPosMod * 0.19 + 5.7);
              float reefPatch  = smoothstep(0.43, 0.67, reefMacro * 0.68 + reefDetail * 0.32)
                               * smoothstep(0.55, 1.75, waterDepth)
                               * (1.0 - smoothstep(5.0, 8.8, waterDepth));
@@ -508,7 +513,7 @@ function init() {
              finalColor += vec3(1.0, 0.90, 0.66) * (sunGlintCore + sunGlintPath);
 
              // 4. Crisp White Shoreline Swash Lace (0.04m..0.62m) + Reef-Crest Breaker Wisps (0.8m..2.4m) — Zero Milky Patina!
-             float foamNoise = wFbm(worldPosition.xz * 0.62 + vec2(time * 0.48, -time * 0.34));
+             float foamNoise = wFbm(wPosMod * 0.62 + vec2(time * 0.48, -time * 0.34));
              float lapWave   = 0.5 + 0.5 * sin(waterDepth * 9.0 - time * 4.8 + foamNoise * 3.2);
              float shoreLace = smoothstep(0.62, 0.06, waterDepth)
                              * smoothstep(0.0, 0.05, waterDepth)
@@ -528,11 +533,11 @@ function init() {
              distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(3.2, 8.5, waterDepth)), 0.0, alpha);
              distAlpha = max(distAlpha, surfWhite * 0.72) * maskFade;
 
-             // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 2400m .. 2880m)
-             float rAtlantisW = length(worldPosition.xz);
+             // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis in the Atlantic Ocean (-10800, -10600)
+             float rAtlantisW = length(worldPosition.xz - vec2(-10800.0, -10600.0));
              float seaMistBand = smoothstep(2400.0, 2530.0, rAtlantisW) * (1.0 - smoothstep(2740.0, 2880.0, rAtlantisW));
              if (seaMistBand > 0.001) {
-                 float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
+                 float mistSwirl = wFbm(wPosMod * 0.014 + vec2(time * 0.18, -time * 0.12));
                  float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
                  finalColor = mix(finalColor, vec3(0.84, 0.94, 0.99), mistAmt * 0.88);
                  distAlpha = max(distAlpha, mistAmt * 0.95);
@@ -555,25 +560,28 @@ function init() {
     
     scene.add(water);
 
-    // 6. Marching Cubes Voxel Terrain Setup (Height 96 voxels = 288m for Sacred Mountain & Alpine Peaks)
+    // 6. Marching Cubes Voxel Terrain Setup (Height 96 voxels = 288m for Sacred Mountain, Mount Ararat & Alpine Peaks)
     terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
 
-    // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis
+    // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis in the Atlantic Ocean
     createAtlantisMistRing(scene);
 
     // 6a-2. Monumental Capital of Atlantis (4 Concentric Walls: Bronze, Tin, Fiery Orichalcum, Gold + Temple of Poseidon & Cleito + Royal Palace + Bridges)
     atlantisCapital = createAtlantisCapital(scene, terrain);
+
+    // Initial Player Spawn on the Mountain Terrace where the Tigris & Euphrates Rivers are born (Armenian Highland / Mount Ararat):
+    const startX = 14200.0;
+    const startZ = -13775.0;
+    camera.position.set(startX, 145.0, startZ);
+    hmCenterX = startX;
+    hmCenterZ = startZ;
+    hmBoundsUniform.value.set(hmCenterX - 2611.2, hmCenterZ - 2611.2, 5222.4, 5222.4);
 
     // 6b. Dynamic Canal Water & Flow System
     waterSystem = new WaterSystem(scene, terrain, camera, waterNormalsTexture);
     water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
     water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
-    // Panoramic Spawn on the Royal Acropolis Esplanade of Cleito:
-    // Directly beholds the 24k Golden Wall & Sacred Sanctuary of Poseidon & Cleito, flanked by the Royal Palace
-    // and encircled by the fiery reddish-glowing Wall of Orichalcum!
-    const startX = 78;
-    const startZ = -245;
     const testPos = new THREE.Vector3(startX, 220, startZ);
 
     // Auto-load custom map from Level Editor before initial chunk generation so custom terrain builds immediately
@@ -588,18 +596,18 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
-    // Build initial chunks around start position immediately across Cleito's Sanctuary & Inner Lagoon
+    // Build initial chunks around the Tigris & Euphrates Headwaters immediately
     terrain.updateChunksAroundPlayer(testPos, 1080, 380);
 
-    // Initialize 768x768 high-precision bathymetry depth texture (5222.4m x 5222.4m centered on 4x Cleito)
+    // Initialize 768x768 high-precision bathymetry depth texture (5222.4m x 5222.4m centered on active region)
     heightmapData = new Uint8Array(768 * 768);
     updateHeightmap();
 
     const groundY = terrain.getSurfaceHeight(testPos, 250.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
-    camera.rotation.set(-0.04, 2.83, 0, 'YXZ');
+    camera.rotation.set(-0.06, 3.08, 0, 'YXZ');
 
-    // Center initial shadow frustum on Cleito spawn terrace
+    // Center initial shadow frustum on spawn terrace
     lastShadowSnapX = Math.round(startX / 16) * 16;
     lastShadowSnapZ = Math.round(startZ / 16) * 16;
     dirLight.target.position.set(lastShadowSnapX, 126, lastShadowSnapZ);
@@ -1172,6 +1180,67 @@ function updateBackgroundMusic(delta) {
 }
 
 // ==========================================
+// DYNAMIC MAP RECENTERING & FAST TRAVEL SYSTEM
+// ==========================================
+function recenterLocalMaps(cx, cz) {
+    hmCenterX = cx;
+    hmCenterZ = cz;
+    hmBoundsUniform.value.set(hmCenterX - 2611.2, hmCenterZ - 2611.2, 5222.4, 5222.4);
+    updateHeightmap();
+    if (waterSystem) {
+        waterSystem.recenterMask(hmCenterX, hmCenterZ);
+        if (water && water.material && water.material.uniforms['waterMaskBounds']) {
+            water.material.uniforms['waterMaskBounds'].value.set(
+                waterSystem.maskMinX,
+                waterSystem.maskMinZ,
+                waterSystem.maskSize,
+                waterSystem.maskSize
+            );
+        }
+    }
+}
+
+function teleportToRegion(regionKey) {
+    if (!terrain || !camera) return;
+    let targetX = 14200.0;
+    let targetZ = -13775.0;
+    let targetYaw = 3.08;
+    let label = '🏔️ Sorgenti del Tigri e dell\'Eufrate';
+
+    if (regionKey === 'atlantis') {
+        targetX = -10722.0; // Acropolis of Cleito (-10800 + 78, -10600 - 245)
+        targetZ = -10845.0;
+        targetYaw = 2.83;
+        label = '👑 Cleito — Capitale di Atlantide (Oceano Atlantico)';
+    } else if (regionKey === 'gibraltar') {
+        targetX = -2100.0;
+        targetZ = -12520.0;
+        targetYaw = 1.57;
+        label = '🏛️ Colonne d\'Ercole (Stretto di Gibilterra)';
+    }
+
+    const destPos = new THREE.Vector3(targetX, 240.0, targetZ);
+    terrain.lastScanTime = 0;
+    terrain.updateChunksAroundPlayer(destPos, 1080, 380);
+    recenterLocalMaps(targetX, targetZ);
+
+    const gY = Math.max(120.5, terrain.getSurfaceHeight(destPos, 250.0));
+    camera.position.set(targetX, gY + playerHeight, targetZ);
+    camera.rotation.set(-0.05, targetYaw, 0, 'YXZ');
+    velocity.set(0, 0, 0);
+
+    lastShadowSnapX = Math.round(targetX / 16) * 16;
+    lastShadowSnapZ = Math.round(targetZ / 16) * 16;
+    if (dirLight && sun) {
+        dirLight.target.position.set(lastShadowSnapX, 126, lastShadowSnapZ);
+        dirLight.position.copy(dirLight.target.position).addScaledVector(sun, 360);
+        renderer.shadowMap.needsUpdate = true;
+    }
+    showMusicToast(`🧭 Viaggio Rapido: ${label}`);
+}
+window.teleportToRegion = teleportToRegion;
+
+// ==========================================
 // INPUT HANDLING
 // ==========================================
 function setupInputListeners() {
@@ -1201,6 +1270,16 @@ function setupInputListeners() {
         }
         if (event.code === 'KeyM') {
             toggleMusicMute();
+        }
+        if (event.code === 'F6') {
+            event.preventDefault();
+            teleportToRegion('tigris');
+        } else if (event.code === 'F7') {
+            event.preventDefault();
+            teleportToRegion('gibraltar');
+        } else if (event.code === 'F8') {
+            event.preventDefault();
+            teleportToRegion('atlantis');
         }
     };
 
@@ -1682,9 +1761,9 @@ function animate() {
         controls.moveRight(velocity.x * delta);
         controls.moveForward(-velocity.z * delta);
 
-        // Keep player inside ocean boundaries (4800 meters from center, matching the 10km water plane)
-        const boundX = 4800;
-        const boundZ = 4800;
+        // Keep player inside planetary globe boundaries (64km West-East, 32km North-South)
+        const boundX = 64000;
+        const boundZ = 32000;
         camera.position.x = Math.max(-boundX, Math.min(boundX, camera.position.x));
         camera.position.z = Math.max(-boundZ, Math.min(boundZ, camera.position.z));
 
@@ -2050,7 +2129,8 @@ function animate() {
     } else {
         // Restore sky dome, mist ring and clouds above water
         if (sky) sky.visible = true;
-        if (atlantisMistGroup) atlantisMistGroup.visible = true;
+        const camDistAtlantis = Math.hypot(camera.position.x - (-10800.0), camera.position.z - (-10600.0));
+        if (atlantisMistGroup) atlantisMistGroup.visible = (camDistAtlantis < 12000.0);
         if (clouds) {
             for (let i = 0; i < clouds.length; i++) clouds[i].visible = true;
         }
@@ -2059,11 +2139,10 @@ function animate() {
             underwaterOverlay.classList.add('hidden');
         }
 
-        // Immersive walk/sail/fly-through fog when crossing the circular Boundary Mist of Plato's Atlantis (r = 2400m .. 2880m)
-        const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
+        // Immersive walk/sail/fly-through fog when crossing the circular Boundary Mist of Plato's Atlantis (r = 2400m .. 2880m around -10800, -10600)
         let mistImmerse = 0.0;
-        if (camDistCenter > 2400.0 && camDistCenter < 2880.0 && camera.position.y < 360.0) {
-            const rBand = Math.sin(((camDistCenter - 2400.0) / 480.0) * Math.PI);
+        if (camDistAtlantis > 2400.0 && camDistAtlantis < 2880.0 && camera.position.y < 360.0) {
+            const rBand = Math.sin(((camDistAtlantis - 2400.0) / 480.0) * Math.PI);
             const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 250.0) / 110.0));
             mistImmerse = Math.max(0.0, rBand * hBand);
         }
@@ -2090,6 +2169,11 @@ function animate() {
     if (atlantisMistUniforms) {
         atlantisMistUniforms.uTime.value += delta;
         atlantisMistUniforms.uCameraPos.value.copy(camera.position);
+    }
+
+    // Dynamically recenter the 5.2km bathymetry & water mask windows when the player travels > 1450m across the planet
+    if (Math.hypot(camera.position.x - hmCenterX, camera.position.z - hmCenterZ) > 1450.0) {
+        recenterLocalMaps(camera.position.x, camera.position.z);
     }
 
     // Keep ocean centered on player horizontally and update planetary curvature center
@@ -2249,6 +2333,7 @@ function animate() {
 // ==========================================
 function createAtlantisMistRing(scene) {
     atlantisMistGroup = new THREE.Group();
+    atlantisMistGroup.position.set(-10800.0, 0, -10600.0);
     atlantisMistUniforms = {
         uTime: { value: 0.0 },
         uCameraPos: { value: new THREE.Vector3() }
@@ -2310,7 +2395,8 @@ function createAtlantisMistRing(scene) {
             }
 
             void main() {
-                float theta = atan(vWorldPos.z, vWorldPos.x);
+                vec2 relMistXZ = vWorldPos.xz - vec2(-10800.0, -10600.0);
+                float theta = atan(relMistXZ.y, relMistXZ.x);
                 float hRel = vWorldPos.y - 120.0;
                 if (hRel < -2.0) discard;
 
@@ -3374,17 +3460,24 @@ function spawnEnvironmentObjects(scene, terrain) {
         cell.push({ x, z });
     }
     function isArchitecturallyClear(wx, wz) {
-        const r = Math.hypot(wx, wz);
+        // Keep clear of the immediate player spawn terrace at Tigris & Euphrates Headwaters
+        if (Math.hypot(wx - 14200.0, wz - (-13775.0)) < 14.0) return false;
+
+        const ax = wx - (-10800.0);
+        const az = wz - (-10600.0);
+        const r = Math.hypot(ax, az);
+        if (r > 2400.0) return true;
+
         // Keep clear of the 4 Concentric Walls (Gold 148m, Orichalcum 390m, Tin 1545m, Bronze 2185m)
         if (Math.abs(r - 148.0) < 9.5 || Math.abs(r - 390.0) < 10.5 || Math.abs(r - 1545.0) < 11.5 || Math.abs(r - 2185.0) < 12.5) {
             return false;
         }
         // Keep clear of the Temple of Poseidon & Cleito + Sacred Springs courtyard
-        if (Math.abs(wx) < 38.0 && Math.abs(wz) < 74.0) return false;
+        if (Math.abs(ax) < 38.0 && Math.abs(az) < 74.0) return false;
         // Keep clear of the 4 cardinal ceremonial avenues & bridge approaches
-        if (Math.abs(wx) < 14.0 || Math.abs(wz) < 14.0) return false;
+        if (Math.abs(ax) < 14.0 || Math.abs(az) < 14.0) return false;
         // Keep clear of the 6 Royal Palace pavilions on the Acropolis esplanade
-        if (r > 180.0 && r < 340.0 && Math.abs(wx) > 155.0 && Math.abs(wx) < 285.0 && Math.abs(wz) < 150.0) {
+        if (r > 180.0 && r < 340.0 && Math.abs(ax) > 155.0 && Math.abs(ax) < 285.0 && Math.abs(az) < 150.0) {
             return false;
         }
         return true;
@@ -3408,11 +3501,28 @@ function spawnEnvironmentObjects(scene, terrain) {
         return true;
     }
     
-    // Helper: uniform circular sampling across Cleito's 4x Central Acropolis, Lagoon Islets & 3 Concentric Rings
+    // Helper: distributes vegetation across BOTH the Tigris/Euphrates/Mesopotamia starting region (14200, -13800)
+    // AND Cleito / Capital of Atlantis + 10 Surrounding Islands in the Atlantic Ocean (-10800, -10600)!
     function sampleAtlantisPoint(maxR) {
-        const rad = Math.sqrt(Math.random()) * maxR;
+        if (Math.random() < 0.48) {
+            // Tigris & Euphrates Headwaters + Mesopotamia Fertile Crescent
+            const rad = Math.sqrt(Math.random()) * (maxR * 0.95);
+            const ang = Math.random() * Math.PI * 2.0;
+            return {
+                wx: 14200.0 + Math.cos(ang) * rad,
+                wz: -13550.0 + Math.sin(ang) * rad * 1.15
+            };
+        }
+        // Cleito (r <= maxR) + 10 Surrounding Atlantean Islands (r = 3000..4650m)
+        const onOuterIslands = (maxR > 1500.0 && Math.random() < 0.22);
+        const rad = onOuterIslands
+            ? (3000.0 + Math.random() * 1650.0)
+            : (Math.sqrt(Math.random()) * maxR);
         const ang = Math.random() * Math.PI * 2.0;
-        return { wx: Math.cos(ang) * rad, wz: Math.sin(ang) * rad };
+        return {
+            wx: -10800.0 + Math.cos(ang) * rad,
+            wz: -10600.0 + Math.sin(ang) * rad
+        };
     }
 
     // Ultra-fast analytical pre-filter + localized 3D isosurface lock (~30x faster startup!)
@@ -3660,9 +3770,9 @@ function updateHeightmap(nearPos, radius) {
     if (!terrain) return;
     const width = 768;
     const depth = 768;
-    const minWorldX = -2611.2;
-    const minWorldZ = -2611.2;
-    const texelSize = 6.8; // 768 * 6.8m = 5222.4m x 5222.4m symmetrically centered on 4x Plato's Atlantis
+    const minWorldX = hmCenterX - 2611.2;
+    const minWorldZ = hmCenterZ - 2611.2;
+    const texelSize = 6.8; // 768 * 6.8m = 5222.4m x 5222.4m dynamically centered on active region
     const scale = 3.0; // voxelScale
 
     let minX = 0, maxX = width - 1;
