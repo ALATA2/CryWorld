@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { VoxelTerrain } from './marching_cubes.js';
-import { WaterSystem } from './water_system.js';
+import { VoxelTerrain } from './marching_cubes.js?v=0.209';
+import { WaterSystem } from './water_system.js?v=0.209';
+import { createAtlantisCapital } from './atlantis_capital.js?v=0.209';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ==========================================
@@ -78,6 +79,7 @@ let instancedPinesBTrunk, instancedPinesBFoliage;
 let instancedRocks, instancedBushes;
 let atlantisMistGroup = null;
 let atlantisMistUniforms = null;
+let atlantisCapital = null;
 
 // Arrays containing positions and falling states of all environment objects
 let palmInstances = [];
@@ -103,7 +105,7 @@ function init() {
     // 1. Scene & Camera Setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff); // Caribbean cyan horizon background
-    scene.fog = new THREE.Fog(0x8ce3ff, 460, 1060); // Clear panoramic view across all 3 concentric rings up to the Ring of Mist
+    scene.fog = new THREE.Fog(0x8ce3ff, 1950, 4100); // Clear panoramic view across 4.8km Cleito & all 4 Concentric Walls up to the Ring of Mist
 
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 45000);
     camera.rotation.order = 'YXZ'; // FPS style rotation order to prevent horizon slant/roll
@@ -350,7 +352,7 @@ function init() {
         texture.generateMipmaps = true;
     });
 
-    const waterGeometry = new THREE.CircleGeometry(3200, 160);
+    const waterGeometry = new THREE.CircleGeometry(7600, 180);
     water = new Water(
         waterGeometry,
         {
@@ -461,9 +463,9 @@ function init() {
          vec3 finalColor = outgoingLight;
 
          if (eye.y >= worldPosition.y) {
-             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy symmetrically centered on Atlantis)
+             // 1. High-precision Bathymetric Water Depth (0.0m .. 25.5m at 10cm accuracy symmetrically centered on 4.8km Atlantis)
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-1152.0, -1152.0)) / 2304.0;
+             vec2 hmUV = (worldPosition.xz - vec2(-2611.2, -2611.2)) / 5222.4;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -526,9 +528,9 @@ function init() {
              distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(3.2, 8.5, waterDepth)), 0.0, alpha);
              distAlpha = max(distAlpha, surfWhite * 0.72) * maskFade;
 
-             // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
+             // 6. Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 2400m .. 2880m)
              float rAtlantisW = length(worldPosition.xz);
-             float seaMistBand = smoothstep(615.0, 685.0, rAtlantisW) * (1.0 - smoothstep(785.0, 860.0, rAtlantisW));
+             float seaMistBand = smoothstep(2400.0, 2530.0, rAtlantisW) * (1.0 - smoothstep(2740.0, 2880.0, rAtlantisW));
              if (seaMistBand > 0.001) {
                  float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
                  float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
@@ -539,7 +541,7 @@ function init() {
 
          // Atmospheric Rayleigh limb halo around the planetary spherical horizon (only visible from above water)
          float distH = length(worldPosition.xz - cameraPos.xz);
-         float atmoLimb = smoothstep(1600.0, 2750.0, distH);
+         float atmoLimb = smoothstep(4200.0, 7200.0, distH);
          vec3 atmoHalo = vec3(0.0);
          if (eye.y >= worldPosition.y) {
              atmoHalo = vec3(0.20, 0.70, 1.0) * atmoLimb * 1.5;
@@ -547,7 +549,7 @@ function init() {
          finalColor += atmoHalo;
 
          // Smooth circular horizon cutoff (zero square edges)
-         float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
+         float horizonAlpha = 1.0 - smoothstep(7100.0, 7500.0, distH);
          gl_FragColor = vec4( finalColor, distAlpha * horizonAlpha );`
     );
     
@@ -559,16 +561,19 @@ function init() {
     // 6a. Volumetric 360° Boundary Mist Ring encircling the 3rd Ring of Plato's Atlantis
     createAtlantisMistRing(scene);
 
+    // 6a-2. Monumental Capital of Atlantis (4 Concentric Walls: Bronze, Tin, Fiery Orichalcum, Gold + Temple of Poseidon & Cleito + Royal Palace + Bridges)
+    atlantisCapital = createAtlantisCapital(scene, terrain);
+
     // 6b. Dynamic Canal Water & Flow System
     waterSystem = new WaterSystem(scene, terrain, camera, waterNormalsTexture);
     water.material.uniforms['waterMaskTexture'] = { value: waterSystem.maskTexture };
     water.material.uniforms['waterMaskBounds'] = { value: new THREE.Vector4(waterSystem.maskMinX, waterSystem.maskMinZ, waterSystem.maskSize, waterSystem.maskSize) };
 
-    // Panoramic Spawn on Cleito's Seaward Sanctuary Terrace:
-    // Overlooks the turquoise Coral Lagoon & living coral reefs, all 3 sculpted Concentric Rings,
-    // Il Grande Canale di Cleito slicing out to the open ocean, and the shimmering golden sun path!
-    const startX = 34;
-    const startZ = -72;
+    // Panoramic Spawn on the Royal Acropolis Esplanade of Cleito:
+    // Directly beholds the 24k Golden Wall & Sacred Sanctuary of Poseidon & Cleito, flanked by the Royal Palace
+    // and encircled by the fiery reddish-glowing Wall of Orichalcum!
+    const startX = 78;
+    const startZ = -245;
     const testPos = new THREE.Vector3(startX, 220, startZ);
 
     // Auto-load custom map from Level Editor before initial chunk generation so custom terrain builds immediately
@@ -584,15 +589,15 @@ function init() {
     }
 
     // Build initial chunks around start position immediately across Cleito's Sanctuary & Inner Lagoon
-    terrain.updateChunksAroundPlayer(testPos, 1050, 340);
+    terrain.updateChunksAroundPlayer(testPos, 1080, 380);
 
-    // Initialize 512x512 high-precision bathymetry depth texture (2304m x 2304m centered on Cleito)
-    heightmapData = new Uint8Array(512 * 512);
+    // Initialize 768x768 high-precision bathymetry depth texture (5222.4m x 5222.4m centered on 4x Cleito)
+    heightmapData = new Uint8Array(768 * 768);
     updateHeightmap();
 
     const groundY = terrain.getSurfaceHeight(testPos, 250.0);
     camera.position.set(startX, groundY + playerHeight, startZ);
-    camera.rotation.set(-0.11, 0.16, 0, 'YXZ');
+    camera.rotation.set(-0.04, 2.83, 0, 'YXZ');
 
     // Center initial shadow frustum on Cleito spawn terrace
     lastShadowSnapX = Math.round(startX / 16) * 16;
@@ -1852,6 +1857,11 @@ function animate() {
             }
         }
 
+        // Resolve horizontal collision against Plato's 4 Concentric Walls, Temple & Royal Palace
+        if (atlantisCapital) {
+            atlantisCapital.resolvePlayerCollision(camera.position, playerHeight, isFlying);
+        }
+
         // Apply vertical velocity (gravity & jump)
         camera.position.y += velocity.y * delta;
 
@@ -1869,11 +1879,14 @@ function animate() {
                 camera.position.y = Math.min(camera.position.y, ceilingY - headOffset);
             }
 
-            // 2. Floor collision check: search downwards from inside current air pocket
+            // 2. Floor collision check: search downwards from inside current air pocket + walkable bridges/stylobate
             const searchStartY = (ceilingY !== Infinity)
                 ? Math.min(camera.position.y + 0.3, ceilingY - 0.2)
                 : Math.max(camera.position.y + 0.8, localWaterLevel + 1.5);
-            const groundHeight = terrain.getSurfaceHeight(camera.position, searchStartY);
+            let groundHeight = terrain.getSurfaceHeight(camera.position, searchStartY);
+            if (atlantisCapital) {
+                groundHeight = Math.max(groundHeight, atlantisCapital.getWalkableSurfaceHeight(camera.position.x, camera.position.z, camera.position.y - playerHeight));
+            }
 
             if (camera.position.y - playerHeight <= groundHeight) {
                 const targetY = groundHeight + playerHeight;
@@ -2046,12 +2059,12 @@ function animate() {
             underwaterOverlay.classList.add('hidden');
         }
 
-        // Immersive walk/sail/fly-through fog when crossing the circular Boundary Mist of Plato's Atlantis (r = 620m .. 860m)
+        // Immersive walk/sail/fly-through fog when crossing the circular Boundary Mist of Plato's Atlantis (r = 2400m .. 2880m)
         const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
         let mistImmerse = 0.0;
-        if (camDistCenter > 615.0 && camDistCenter < 865.0 && camera.position.y < 290.0) {
-            const rBand = Math.sin(((camDistCenter - 615.0) / 250.0) * Math.PI);
-            const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 210.0) / 80.0));
+        if (camDistCenter > 2400.0 && camDistCenter < 2880.0 && camera.position.y < 360.0) {
+            const rBand = Math.sin(((camDistCenter - 2400.0) / 480.0) * Math.PI);
+            const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 250.0) / 110.0));
             mistImmerse = Math.max(0.0, rBand * hBand);
         }
 
@@ -2060,9 +2073,9 @@ function animate() {
         scene.fog.color.copy(finalFogCol);
         scene.background.copy(finalFogCol);
 
-        // Clear panoramic view across all 3 concentric rings (460m .. 1060m), thickening smoothly inside the Mist Veil!
-        const baseNear = 460.0 + (10000.0 - 460.0) * altFactor;
-        const baseFar  = 1060.0 + (45000.0 - 1060.0) * altFactor;
+        // Clear panoramic view across all 4.8km concentric rings & walls (1950m .. 4100m), thickening smoothly inside the Mist Veil!
+        const baseNear = 1950.0 + (10000.0 - 1950.0) * altFactor;
+        const baseFar  = 4100.0 + (45000.0 - 4100.0) * altFactor;
         scene.fog.near = THREE.MathUtils.lerp(baseNear, 16.0, mistImmerse);
         scene.fog.far  = THREE.MathUtils.lerp(baseFar, 155.0, mistImmerse);
 
@@ -2198,10 +2211,13 @@ function animate() {
         sky.material.uniforms['uTime'].value += delta;
     }
 
-    // 5e. Update active terrain chunks, snap shadow frustum when moving/streaming, and center sky dome
+    // 5e. Update active terrain chunks, distant Atlantis LOD & shaders, and snap shadow frustum
     if (terrain) {
-        const dynamicRenderDist = Math.min(1250.0, 1000.0 + altFactor * 250.0); // 1000m on ground, 1250m in orbit
+        const dynamicRenderDist = Math.min(1350.0, 1050.0 + altFactor * 300.0); // 1050m on ground, 1350m in orbit
         terrain.updateChunksAroundPlayer(camera.position, dynamicRenderDist);
+        if (atlantisCapital) {
+            atlantisCapital.update(delta, camera.position, dynamicRenderDist);
+        }
 
         if (dirLight && sun) {
             const dxS = camera.position.x - lastShadowSnapX;
@@ -2299,18 +2315,18 @@ function createAtlantisMistRing(scene) {
                 if (hRel < -2.0) discard;
 
                 // Animated billowing cloud plumes drifting around the perimeter of the 3rd Ring
-                vec2 cloudCoord = vec2(theta * 14.0 + uTime * 0.055, hRel * 0.022 - uTime * 0.03);
+                vec2 cloudCoord = vec2(theta * 36.0 + uTime * 0.055, hRel * 0.018 - uTime * 0.03);
                 float billow = mFbm(cloudCoord);
                 float fineWisp = mFbm(cloudCoord * 2.7 - vec2(uTime * 0.08, 0.0));
 
-                float dynamicTop = 85.0 + billow * 72.0 + fineWisp * 24.0;
-                float bottomFade = smoothstep(-1.0, 12.0, hRel);
+                float dynamicTop = 115.0 + billow * 92.0 + fineWisp * 30.0;
+                float bottomFade = smoothstep(-1.0, 14.0, hRel);
                 float topFade = 1.0 - smoothstep(dynamicTop * 0.52, dynamicTop, hRel);
 
                 // Dissolve individual shells close to camera while scene.fog seamlessly immerses the player
                 float camDist = length(vWorldPos - uCameraPos);
                 float nearDissolve = smoothstep(10.0, 52.0, camDist);
-                float farFade = 1.0 - smoothstep(1900.0, 2750.0, camDist);
+                float farFade = 1.0 - smoothstep(4800.0, 7200.0, camDist);
 
                 vec3 viewDir = normalize(uCameraPos - vWorldPos);
                 float facing = 0.35 + 0.65 * abs(dot(normalize(vWorldNormal), viewDir));
@@ -2321,18 +2337,18 @@ function createAtlantisMistRing(scene) {
                 // Pearlescent sunlit mist top -> aquamarine sea-fog base
                 vec3 baseMistCol = vec3(0.74, 0.89, 0.97);
                 vec3 sunTopCol   = vec3(0.95, 0.98, 1.00);
-                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 95.0 + billow * 0.25, 0.0, 1.0));
+                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 115.0 + billow * 0.25, 0.0, 1.0));
 
                 gl_FragColor = vec4(col, clamp(density * 0.46, 0.0, 0.78));
             }
         `
     });
 
-    // 4 nested concentric billowing mist curtains spanning r = 655m .. 805m around the 3rd Land Ring
-    const shellRadii = [655, 700, 750, 805];
-    const shellHeight = 165;
+    // 4 nested concentric billowing mist curtains spanning r = 2450m .. 2810m around the 3rd Land Ring (Bronze Wall)
+    const shellRadii = [2450, 2560, 2680, 2810];
+    const shellHeight = 230;
     for (let i = 0; i < shellRadii.length; i++) {
-        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 96, 8, true);
+        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 128, 8, true);
         const cylMesh = new THREE.Mesh(cylGeo, mistShaderMat);
         cylMesh.position.set(0, 118.0 + shellHeight * 0.5, 0);
         cylMesh.rotation.y = i * 0.65;
@@ -2347,10 +2363,10 @@ function createAtlantisMistRing(scene) {
 // PROCEDURAL ENVIRONMENT GENERATION (PALM TREES, TROPICAL BUSHES & BOULDERS)
 // ==========================================
 function spawnEnvironmentObjects(scene, terrain) {
-    const palmTreesCount = 680;
-    const pineTreesCount = 640;
-    const rocksCount = 210;
-    const bushesCount = 960;
+    const palmTreesCount = 2200;
+    const pineTreesCount = 2000;
+    const rocksCount = 420;
+    const bushesCount = 2600;
     
     // Procedural Coconut Palm Tree generator (seamless curved trunk & lush arching fronds)
     function createPalmTree() {
@@ -3343,17 +3359,56 @@ function spawnEnvironmentObjects(scene, terrain) {
     envGroup.add(instancedRocks);
     envGroup.add(instancedBushes);
     
-    const spawnedPositions = [];
+    // Fast O(1) spatial hash grid + architectural keep-out check for Plato's Walls, Temple, Palace & Bridges
+    const spatialGrid = new Map();
+    const gridCellSize = 6.0;
+    function registerSpawnPos(x, z) {
+        const gx = Math.floor(x / gridCellSize);
+        const gz = Math.floor(z / gridCellSize);
+        const key = `${gx},${gz}`;
+        let cell = spatialGrid.get(key);
+        if (!cell) {
+            cell = [];
+            spatialGrid.set(key, cell);
+        }
+        cell.push({ x, z });
+    }
+    function isArchitecturallyClear(wx, wz) {
+        const r = Math.hypot(wx, wz);
+        // Keep clear of the 4 Concentric Walls (Gold 148m, Orichalcum 390m, Tin 1545m, Bronze 2185m)
+        if (Math.abs(r - 148.0) < 9.5 || Math.abs(r - 390.0) < 10.5 || Math.abs(r - 1545.0) < 11.5 || Math.abs(r - 2185.0) < 12.5) {
+            return false;
+        }
+        // Keep clear of the Temple of Poseidon & Cleito + Sacred Springs courtyard
+        if (Math.abs(wx) < 38.0 && Math.abs(wz) < 74.0) return false;
+        // Keep clear of the 4 cardinal ceremonial avenues & bridge approaches
+        if (Math.abs(wx) < 14.0 || Math.abs(wz) < 14.0) return false;
+        // Keep clear of the 6 Royal Palace pavilions on the Acropolis esplanade
+        if (r > 180.0 && r < 340.0 && Math.abs(wx) > 155.0 && Math.abs(wx) < 285.0 && Math.abs(wz) < 150.0) {
+            return false;
+        }
+        return true;
+    }
     function isFarEnough(x, z, minDist) {
-        for (const pos of spawnedPositions) {
-            const dx = pos.x - x;
-            const dz = pos.z - z;
-            if (dx*dx + dz*dz < minDist * minDist) return false;
+        if (!isArchitecturallyClear(x, z)) return false;
+        const minDistSq = minDist * minDist;
+        const gx = Math.floor(x / gridCellSize);
+        const gz = Math.floor(z / gridCellSize);
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+                const cell = spatialGrid.get(`${gx + dx},${gz + dz}`);
+                if (!cell) continue;
+                for (let i = 0; i < cell.length; i++) {
+                    const dpx = cell[i].x - x;
+                    const dpz = cell[i].z - z;
+                    if (dpx * dpx + dpz * dpz < minDistSq) return false;
+                }
+            }
         }
         return true;
     }
     
-    // Helper: uniform circular sampling across Cleito's Central Sanctuary, Lagoon Islets & 3 Concentric Rings
+    // Helper: uniform circular sampling across Cleito's 4x Central Acropolis, Lagoon Islets & 3 Concentric Rings
     function sampleAtlantisPoint(maxR) {
         const rad = Math.sqrt(Math.random()) * maxR;
         const ang = Math.random() * Math.PI * 2.0;
@@ -3405,20 +3460,20 @@ function spawnEnvironmentObjects(scene, terrain) {
             falling: false
         });
 
-        spawnedPositions.push({ x: wx, z: wz });
+        registerSpawnPos(wx, wz);
         treesPlaced++;
     }
 
-    // Spawning loop for Clustered Coconut Palm Groves (beaches, lagoon islets & coastal slopes of Cleito)
+    // Spawning loop for Clustered Coconut Palm Groves (beaches, lagoon islets & coastal slopes of 4x Cleito)
     let attempts = 0;
     let treesPlaced = 0;
-    while (treesPlaced < palmTreesCount && attempts < 7200) {
+    while (treesPlaced < palmTreesCount && attempts < 18000) {
         attempts++;
-        const maxR = (treesPlaced < palmTreesCount * 0.36) ? 275.0 : 605.0;
+        const maxR = (treesPlaced < palmTreesCount * 0.26) ? 980.0 : 2260.0;
         const { wx, wz } = sampleAtlantisPoint(maxR);
-        const groundHeight = getFastGroundHeight(wx, wz, 120.35, 143.5);
+        const groundHeight = getFastGroundHeight(wx, wz, 120.35, 136.5);
 
-        if (groundHeight > 120.35 && groundHeight < 143.5 && isFarEnough(wx, wz, 3.6)) {
+        if (groundHeight > 120.35 && groundHeight < 136.5 && isFarEnough(wx, wz, 3.8)) {
             placeSinglePalm(wx, wz, groundHeight);
 
             // Natural tropical palm grove clustering: 45% chance to sprout 1-2 companion palms nearby!
@@ -3429,8 +3484,8 @@ function spawnEnvironmentObjects(scene, terrain) {
                     const cDist = 3.2 + Math.random() * 2.8;
                     const cx = wx + Math.cos(cAng) * cDist;
                     const cz = wz + Math.sin(cAng) * cDist;
-                    const ch = getFastGroundHeight(cx, cz, 120.35, 143.5);
-                    if (ch > 120.35 && ch < 143.5 && isFarEnough(cx, cz, 2.9)) {
+                    const ch = getFastGroundHeight(cx, cz, 120.35, 136.5);
+                    if (ch > 120.35 && ch < 136.5 && isFarEnough(cx, cz, 2.9)) {
                         placeSinglePalm(cx, cz, ch);
                     }
                 }
@@ -3445,14 +3500,14 @@ function spawnEnvironmentObjects(scene, terrain) {
     attempts = 0;
     let pinesAPlaced = 0;
     let pinesBPlaced = 0;
-    while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 8500) {
+    while ((pinesAPlaced + pinesBPlaced) < pineTreesCount && attempts < 22000) {
         attempts++;
-        const maxR = ((pinesAPlaced + pinesBPlaced) < pineTreesCount * 0.34) ? 275.0 : 598.0;
+        const maxR = ((pinesAPlaced + pinesBPlaced) < pineTreesCount * 0.25) ? 980.0 : 2245.0;
         const { wx, wz } = sampleAtlantisPoint(maxR);
-        const groundHeight = getFastGroundHeight(wx, wz, 122.0, 186.0);
+        const groundHeight = getFastGroundHeight(wx, wz, 122.0, 152.0);
 
-        // Clothe Cleito's concentric rings, coves & Sacred Mountain slopes (122.0m up to 186.0m) in lush jungle canopy
-        if (groundHeight >= 122.0 && groundHeight < 186.0 && isFarEnough(wx, wz, 4.2)) {
+        // Clothe Cleito's concentric rings, coves & Acropolis gardens (122.0m up to 152.0m) in lush jungle canopy
+        if (groundHeight >= 122.0 && groundHeight < 152.0 && isFarEnough(wx, wz, 4.4)) {
             const y = groundHeight - 0.16;
             const rotationY = Math.random() * Math.PI * 2;
             const scXZ = 0.80 + Math.random() * 0.52;
@@ -3463,7 +3518,7 @@ function spawnEnvironmentObjects(scene, terrain) {
             tmpQuat.setFromEuler(tmpEuler.set(0, rotationY, 0));
             const matrix = new THREE.Matrix4().compose(tmpPos, tmpQuat, tmpScale);
 
-            const wantSpeciesB = (groundHeight > 136.0 || Math.random() < 0.44) && (pinesBPlaced < speciesBCount);
+            const wantSpeciesB = (groundHeight > 134.0 || Math.random() < 0.44) && (pinesBPlaced < speciesBCount);
             const useB = wantSpeciesB || (pinesAPlaced >= speciesACount);
 
             if (useB && pinesBPlaced < speciesBCount) {
@@ -3492,7 +3547,7 @@ function spawnEnvironmentObjects(scene, terrain) {
                 pinesAPlaced++;
             }
 
-            spawnedPositions.push({ x: wx, z: wz });
+            registerSpawnPos(wx, wz);
         }
     }
     instancedPinesTrunk.count = pinesAPlaced;
@@ -3503,12 +3558,13 @@ function spawnEnvironmentObjects(scene, terrain) {
     // Spawning loop for Lush Tropical Ferns & Coastal Dune Shrubs (heavily feathering the 120.85m..128.5m beach-grass edge!)
     attempts = 0;
     let bushesPlaced = 0;
-    while (bushesPlaced < bushesCount && attempts < 9500) {
+    while (bushesPlaced < bushesCount && attempts < 22000) {
         attempts++;
-        const maxR = (bushesPlaced < bushesCount * 0.38) ? 280.0 : 602.0;
+        const maxR = (bushesPlaced < bushesCount * 0.26) ? 980.0 : 2255.0;
         const { wx, wz } = sampleAtlantisPoint(maxR);
-        // First 55% of shrubs concentrate right along the dune-scrub transition (120.85m .. 129.0m) for a 3D feathered beach edge!
-        const maxBushY = (bushesPlaced < bushesCount * 0.55) ? 129.0 : 174.0;
+        if (!isArchitecturallyClear(wx, wz)) continue;
+        // First 55% of shrubs concentrate right along the dune-scrub transition (120.85m .. 128.5m) for a 3D feathered beach edge!
+        const maxBushY = (bushesPlaced < bushesCount * 0.55) ? 128.5 : 151.0;
         const groundHeight = getFastGroundHeight(wx, wz, 120.85, maxBushY);
         if (groundHeight >= 120.85 && groundHeight < maxBushY) {
             const y = groundHeight - 0.08;
@@ -3537,9 +3593,9 @@ function spawnEnvironmentObjects(scene, terrain) {
     // Spawning loop for Natural Shoreline Boulders (concentrated along rocky coves, keeping green hills clean & lush!)
     attempts = 0;
     let rocksPlaced = 0;
-    while (rocksPlaced < rocksCount && attempts < 5500) {
+    while (rocksPlaced < rocksCount && attempts < 11000) {
         attempts++;
-        const { wx, wz } = sampleAtlantisPoint(640.0);
+        const { wx, wz } = sampleAtlantisPoint(2320.0);
         const groundHeight = getFastGroundHeight(wx, wz, 119.0, 123.6);
 
         if (groundHeight > 119.0 && groundHeight < 123.6 && isFarEnough(wx, wz, 5.2)) {
@@ -3573,7 +3629,7 @@ function spawnEnvironmentObjects(scene, terrain) {
                 falling: false
             });
 
-            spawnedPositions.push({ x: wx, z: wz });
+            registerSpawnPos(wx, wz);
             rocksPlaced++;
         }
     }
@@ -3602,11 +3658,11 @@ function spawnEnvironmentObjects(scene, terrain) {
 
 function updateHeightmap(nearPos, radius) {
     if (!terrain) return;
-    const width = 512;
-    const depth = 512;
-    const minWorldX = -1152.0;
-    const minWorldZ = -1152.0;
-    const texelSize = 4.5; // 512 * 4.5m = 2304m x 2304m symmetrically centered on Plato's Atlantis
+    const width = 768;
+    const depth = 768;
+    const minWorldX = -2611.2;
+    const minWorldZ = -2611.2;
+    const texelSize = 6.8; // 768 * 6.8m = 5222.4m x 5222.4m symmetrically centered on 4x Plato's Atlantis
     const scale = 3.0; // voxelScale
 
     let minX = 0, maxX = width - 1;

@@ -1,14 +1,15 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { VoxelTerrain } from "./marching_cubes.js";
+import { VoxelTerrain } from "./marching_cubes.js?v=0.209";
+import { createAtlantisCapital } from "./atlantis_capital.js?v=0.209";
 
 // ==========================================
 // EDITOR GAMEPLAY STATE & GLOBALS
 // ==========================================
 let scene, camera, renderer, clock;
 let terrain, water, sky, sun;
-let atlantisMistGroup = null, atlantisMistUniforms = null;
+let atlantisMistGroup = null, atlantisMistUniforms = null, atlantisCapital = null;
 let heightmapData = null, heightmapTexture = null;
 let raycaster;
 let brushRing, brushDisc;
@@ -112,7 +113,7 @@ function showToast(msg) {
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ce3ff);
-    scene.fog = new THREE.Fog(0x8ce3ff, 460, 1060); // Clear panoramic view across all 3 concentric rings + Mist Ring!
+    scene.fog = new THREE.Fog(0x8ce3ff, 1950, 4100); // Clear panoramic view across 4.8km Cleito, 4 Walls + Mist Ring!
 
     clock = new THREE.Clock();
     raycaster = new THREE.Raycaster();
@@ -263,7 +264,7 @@ function init() {
         texture.generateMipmaps = true;
     });
 
-    const waterGeometry = new THREE.CircleGeometry(3200, 160);
+    const waterGeometry = new THREE.CircleGeometry(7600, 180);
     water = new Water(waterGeometry, {
         textureWidth: 512,
         textureHeight: 512,
@@ -340,7 +341,7 @@ function init() {
          vec3 finalColor = outgoingLight;
          if (eye.y >= worldPosition.y) {
              float waterDepth = 25.5;
-             vec2 hmUV = (worldPosition.xz - vec2(-1152.0, -1152.0)) / 2304.0;
+             vec2 hmUV = (worldPosition.xz - vec2(-2611.2, -2611.2)) / 5222.4;
              if (hmUV.x > 0.002 && hmUV.x < 0.998 && hmUV.y > 0.002 && hmUV.y < 0.998) {
                  float hmSample = texture2D(heightmapTexture, hmUV).r * 25.5;
                  float hmEdge = smoothstep(0.002, 0.04, hmUV.x) * smoothstep(0.998, 0.96, hmUV.x)
@@ -394,9 +395,9 @@ function init() {
              distAlpha = clamp(mix(opticalAlpha, alpha, smoothstep(3.2, 8.5, waterDepth)), 0.0, alpha);
              distAlpha = max(distAlpha, surfWhite * 0.72);
 
-             // Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 620m .. 855m)
+             // Sea-hugging Boundary Mist Ring around the 3rd Concentric Ring of Plato's Atlantis (r = 2400m .. 2880m)
              float rAtlantisW = length(worldPosition.xz);
-             float seaMistBand = smoothstep(615.0, 685.0, rAtlantisW) * (1.0 - smoothstep(785.0, 860.0, rAtlantisW));
+             float seaMistBand = smoothstep(2400.0, 2530.0, rAtlantisW) * (1.0 - smoothstep(2740.0, 2880.0, rAtlantisW));
              if (seaMistBand > 0.001) {
                  float mistSwirl = wFbm(worldPosition.xz * 0.014 + vec2(time * 0.18, -time * 0.12));
                  float mistAmt = seaMistBand * (0.62 + 0.38 * mistSwirl);
@@ -406,9 +407,9 @@ function init() {
          }
          float distH = length(worldPosition.xz - cameraPos.xz);
          if (eye.y >= worldPosition.y) {
-             finalColor += vec3(0.20, 0.70, 1.0) * smoothstep(1600.0, 2750.0, distH) * 1.5;
+             finalColor += vec3(0.20, 0.70, 1.0) * smoothstep(4200.0, 7200.0, distH) * 1.5;
          }
-         float horizonAlpha = 1.0 - smoothstep(2700.0, 2800.0, distH);
+         float horizonAlpha = 1.0 - smoothstep(7100.0, 7500.0, distH);
          gl_FragColor = vec4( finalColor, distAlpha * horizonAlpha );`
     );
 
@@ -417,6 +418,7 @@ function init() {
     // Marching Cubes Voxel Terrain (Planetary Engine with Height 96 voxels)
     terrain = new VoxelTerrain(scene, 256, 96, 256, 3.0);
     createAtlantisMistRing(scene);
+    atlantisCapital = createAtlantisCapital(scene, terrain);
 
     // Auto-load custom map from localStorage if present before building initial chunks
     try {
@@ -430,9 +432,9 @@ function init() {
         console.warn("Could not load custom map:", e);
     }
 
-    terrain.updateChunksAroundPlayer(playerPos, 1000, 340);
+    terrain.updateChunksAroundPlayer(playerPos, 1050, 340);
 
-    heightmapData = new Uint8Array(512 * 512);
+    heightmapData = new Uint8Array(768 * 768);
     updateHeightmap();
 
     // Foliage Group
@@ -853,11 +855,11 @@ function applyActiveTool(actionType = "primary") {
 
 function updateHeightmap(nearPos, radius) {
     if (!terrain || !heightmapData) return;
-    const width = 512;
-    const depth = 512;
-    const minWorldX = -1152.0;
-    const minWorldZ = -1152.0;
-    const texelSize = 4.5;
+    const width = 768;
+    const depth = 768;
+    const minWorldX = -2611.2;
+    const minWorldZ = -2611.2;
+    const texelSize = 6.8;
     const scale = 3.0;
 
     let minX = 0, maxX = width - 1;
@@ -1430,16 +1432,16 @@ function animate() {
     }
     const camDistCenter = Math.hypot(camera.position.x, camera.position.z);
     let mistImmerse = 0.0;
-    if (camDistCenter > 615.0 && camDistCenter < 865.0 && camera.position.y < 290.0) {
-        const rBand = Math.sin(((camDistCenter - 615.0) / 250.0) * Math.PI);
-        const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 210.0) / 80.0));
+    if (camDistCenter > 2400.0 && camDistCenter < 2880.0 && camera.position.y < 360.0) {
+        const rBand = Math.sin(((camDistCenter - 2400.0) / 480.0) * Math.PI);
+        const hBand = 1.0 - Math.max(0.0, Math.min(1.0, (camera.position.y - 250.0) / 110.0));
         mistImmerse = Math.max(0.0, rBand * hBand);
     }
     const targetFogCol = baseAtmo.clone().lerp(new THREE.Color(0xdcf0fa), mistImmerse * 0.90);
     scene.fog.color.lerp(targetFogCol, 0.12);
     scene.background.lerp(targetFogCol, 0.12);
-    scene.fog.near = THREE.MathUtils.lerp(460.0, 16.0, mistImmerse);
-    scene.fog.far  = THREE.MathUtils.lerp(1060.0, 155.0, mistImmerse);
+    scene.fog.near = THREE.MathUtils.lerp(1950.0, 16.0, mistImmerse);
+    scene.fog.far  = THREE.MathUtils.lerp(4100.0, 155.0, mistImmerse);
 
     if (atlantisMistUniforms) {
         atlantisMistUniforms.uTime.value += delta;
@@ -1526,9 +1528,12 @@ function animate() {
         lastFpsTime = now;
     }
 
-    // 8. Stream voxel chunks around player/camera
-    terrain.updateChunksAroundPlayer(camera.position, 1000);
+    // 8. Stream voxel chunks around player/camera & update distant Atlantis LOD
+    terrain.updateChunksAroundPlayer(camera.position, 1080);
     terrain.update();
+    if (atlantisCapital) {
+        atlantisCapital.update(delta, camera.position, 1080);
+    }
 
     renderer.render(scene, camera);
 }
@@ -1603,17 +1608,17 @@ function createAtlantisMistRing(scene) {
                 float hRel = vWorldPos.y - 120.0;
                 if (hRel < -2.0) discard;
 
-                vec2 cloudCoord = vec2(theta * 14.0 + uTime * 0.055, hRel * 0.022 - uTime * 0.03);
+                vec2 cloudCoord = vec2(theta * 36.0 + uTime * 0.055, hRel * 0.018 - uTime * 0.03);
                 float billow = mFbm(cloudCoord);
                 float fineWisp = mFbm(cloudCoord * 2.7 - vec2(uTime * 0.08, 0.0));
 
-                float dynamicTop = 85.0 + billow * 72.0 + fineWisp * 24.0;
-                float bottomFade = smoothstep(-1.0, 12.0, hRel);
+                float dynamicTop = 115.0 + billow * 92.0 + fineWisp * 30.0;
+                float bottomFade = smoothstep(-1.0, 14.0, hRel);
                 float topFade = 1.0 - smoothstep(dynamicTop * 0.52, dynamicTop, hRel);
 
                 float camDist = length(vWorldPos - uCameraPos);
                 float nearDissolve = smoothstep(10.0, 52.0, camDist);
-                float farFade = 1.0 - smoothstep(1900.0, 2750.0, camDist);
+                float farFade = 1.0 - smoothstep(4800.0, 7200.0, camDist);
 
                 vec3 viewDir = normalize(uCameraPos - vWorldPos);
                 float facing = 0.35 + 0.65 * abs(dot(normalize(vWorldNormal), viewDir));
@@ -1623,17 +1628,17 @@ function createAtlantisMistRing(scene) {
 
                 vec3 baseMistCol = vec3(0.74, 0.89, 0.97);
                 vec3 sunTopCol   = vec3(0.95, 0.98, 1.00);
-                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 95.0 + billow * 0.25, 0.0, 1.0));
+                vec3 col = mix(baseMistCol, sunTopCol, clamp(hRel / 115.0 + billow * 0.25, 0.0, 1.0));
 
                 gl_FragColor = vec4(col, clamp(density * 0.46, 0.0, 0.78));
             }
         `
     });
 
-    const shellRadii = [655, 700, 750, 805];
-    const shellHeight = 165;
+    const shellRadii = [2450, 2560, 2680, 2810];
+    const shellHeight = 230;
     for (let i = 0; i < shellRadii.length; i++) {
-        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 96, 8, true);
+        const cylGeo = new THREE.CylinderGeometry(shellRadii[i], shellRadii[i] * 0.985, shellHeight, 128, 8, true);
         const cylMesh = new THREE.Mesh(cylGeo, mistShaderMat);
         cylMesh.position.set(0, 118.0 + shellHeight * 0.5, 0);
         cylMesh.rotation.y = i * 0.65;

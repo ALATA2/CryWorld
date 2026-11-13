@@ -13,12 +13,12 @@ export class WaterSystem {
         this.voxelScale = 3.0;
         this.seaLevel = 120.0;
 
-        // Limiti della maschera 2D centrata simmetricamente sull'arcipelago circolare di Atlantide (2048m x 2048m)
-        this.maskMinX = -1024.0;
-        this.maskMinZ = -1024.0;
-        this.maskSize = 2048.0;
+        // Limiti della maschera 2D centrata simmetricamente sulla Capitale 4x di Atlantide/Cleito (5120m x 5120m)
+        this.maskMinX = -2560.0;
+        this.maskMinZ = -2560.0;
+        this.maskSize = 5120.0;
         this.maskRes = 512;
-        this.maskTexelSize = this.maskSize / this.maskRes; // 4.0 metri per texel
+        this.maskTexelSize = this.maskSize / this.maskRes; // 10.0 metri per texel
 
         // Texture di mascheratura per il mare globale
         // 0 = Terraferma asciutta (il piano dell'oceano a 120m viene scartato nello shader)
@@ -64,9 +64,8 @@ export class WaterSystem {
                 const vx = Math.round(wx / this.voxelScale);
                 const idx = tx + tz * this.maskRes;
 
-                // Maschera (0) solo l'interno dell'isola ben sopra il livello del mare (> 122.5m),
-                // lasciando il bagnasciuga naturale libero da scalettature di 4m (gestito dallo Z-buffer 3D!)
-                if (this.terrain.getBaseDensity(vx, 40, vz) <= 0.85) {
+                // Maschera (0) solo l'interno ben sopra il livello del mare, lasciando il bagnasciuga libero da scalettature
+                if (this.terrain.getBaseDensity(vx, 40, vz) <= 1.45) {
                     this.maskData[idx] = 255;
                 } else {
                     this.maskData[idx] = 0;
